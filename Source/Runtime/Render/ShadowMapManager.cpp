@@ -44,6 +44,15 @@ FTexture2D* FShadowMapManager::GetOrCreateShadowMap(uint32 LightID)
 	return NewShadowMap;
 }
 
+FTexture2D* FShadowMapManager::GetShadowMapOrNull(uint32 LightID) const
+{
+	if (const TUniquePtr<FTexture2D>* ShadowMap = ShadowMaps.Find(LightID))
+	{
+		return ShadowMap->get();
+	}
+	return nullptr;
+}
+
 FShadowInfo FShadowMapManager::GetShadowInfo(uint32 LightID)
 {
 	FShadowInfo Info;

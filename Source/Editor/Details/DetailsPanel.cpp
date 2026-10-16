@@ -891,6 +891,31 @@ void FDetailsPanel::OnRender()
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
 
+			/* Shadow Map */
+			if (auto* Light = Cast<ULightComponent>(TargetComponent))
+			{
+				if (UWorld* World = Light->GetWorld())
+				{
+					FTexture2D* ShadowMap =
+						World->GetScene()
+						.GetShadowMapManager()
+						.GetShadowMapOrNull(Light->GetUUID());
+
+					if (ShadowMap && ShadowMap->GetSRV())
+					{
+						ImGui::TextUnformatted("Shadow Map");
+
+						ImGui::Image(
+							(ImTextureID)ShadowMap->GetSRV(),
+							{ 256, 256 });
+					}
+					else
+					{
+						ImGui::TextUnformatted("Shadow Map: Not Available");
+					}
+				}
+			}
+
 			if(SelectCandidateComponent != TargetComponent)
 			{
 				SelectComponent(TargetComponent);

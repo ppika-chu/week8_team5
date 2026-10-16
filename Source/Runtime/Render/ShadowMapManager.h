@@ -17,6 +17,7 @@ class FShadowMapManager
 {
 public:
 	FTexture2D* GetOrCreateShadowMap(uint32 LightID);
+	FTexture2D* GetShadowMapOrNull(uint32 LightID) const;
 	FShadowInfo GetShadowInfo(uint32 LightID);
 	void ReleaseShadowMap(uint32 LightID);
 
