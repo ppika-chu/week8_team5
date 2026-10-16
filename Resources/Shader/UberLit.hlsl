@@ -54,7 +54,7 @@ struct FLightRenderParameters
     float HalfWidth;
     float HalfHeight;
     uint Type;
-    float BarnDoorCos;     // Rect 전용
+    float BarnDoorCos; // Rect 전용
     float BarnDoorSin;
     float BarnDoorLength;
     float Padding;
@@ -129,14 +129,72 @@ cbuffer SpotShadowConstants : register(b6)
 };
 
 // t16-t19
-Texture2D<float> SpotShadowMap : register(t16);
+Texture2D<float> SpotShadowMaps[4] : register(t16);
 SamplerComparisonState ShadowSampler : register(s1);
+
+cbuffer ShadowReceiverConstants : register(b7)
+{
+    uint ReceiveShadow;
+    uint3 Padding;
+}
+
+float SampleSpotShadow(int Index, float2 UV, float Depth)
+{
+    switch (Index)
+    {
+        case 0:
+            return SpotShadowMaps[0].SampleCmpLevelZero(ShadowSampler, UV, Depth);
+        case 1:
+            return SpotShadowMaps[1].SampleCmpLevelZero(ShadowSampler, UV, Depth);
+        case 2:
+            return SpotShadowMaps[2].SampleCmpLevelZero(ShadowSampler, UV, Depth);
+        case 3:
+            return SpotShadowMaps[3].SampleCmpLevelZero(ShadowSampler, UV, Depth);
+        default:
+            return 1.0f;
+    }
+}
+
+float CalculateSpotShadow(int Index, float3 WorldPos)
+{
+    if (Index < 0 || Index >= 4)
+    {
+        return 1.0f;
+    }
+    
+    // P_Clip = P_World * VP_Shadow
+    float4 Clip = mul(
+        float4(WorldPos, 1.0f),
+        ShadowviewProjection[Index]);
+  
+    if (Clip.w <= 0.0f)
+    {
+        return 1.0f;
+    }
+    
+    float3 NDC = Clip.xyz / Clip.w;
+    
+    float2 UV = float2(
+        NDC.x * 0.5f + 0.5f,
+        0.5f - NDC.y * 0.5f);
+    
+    if (any(UV < 0.0f) || any(UV > 1.0f) ||
+        NDC.z < 0.0f || NDC.z > 1.0f)
+    {
+        return 1.0f;
+    }
+    
+    return SampleSpotShadow(
+        Index,
+        UV,
+        NDC.z - ShadowBias[Index].x);
+}
 
 struct VS_INPUT
 {
     float3 Position : POSITION;
     float3 Normal : NORMAL;
-    float4 Tangent : TANGENT;   // w = 바이탄젠트 부호
+    float4 Tangent : TANGENT; // w = 바이탄젠트 부호
     float2 UV : TEXCOORD;
     float4 Color : COLOR;
 };
@@ -231,16 +289,16 @@ FLightContribution CalcSpotLight(FLightRenderParameters Light, float3 N, float3 
 
 FLightContribution CalcRectLight(FLightRenderParameters Light, float3 N, float3 V, float3 WorldPos, float InShininess)
 {
-    const float3 Up = cross(Light.Direction, Light.Right);  // Z축
+    const float3 Up = cross(Light.Direction, Light.Right); // Z축
     const float3 CenterToSurface = WorldPos - Light.Position;
 
     // 1) 사각형 위에서 표면과 가장 가까운 점 찾기
-    const float RectX = clamp(dot(CenterToSurface, Light.Right), -Light.HalfWidth,  Light.HalfWidth);   // 사각형 가로 좌표
-    const float RectY = clamp(dot(CenterToSurface, Up),          -Light.HalfHeight, Light.HalfHeight);  // 사각형 세로 좌표
+    const float RectX = clamp(dot(CenterToSurface, Light.Right), -Light.HalfWidth, Light.HalfWidth); // 사각형 가로 좌표
+    const float RectY = clamp(dot(CenterToSurface, Up), -Light.HalfHeight, Light.HalfHeight); // 사각형 세로 좌표
     const float3 ClosestPoint = Light.Position + Light.Right * RectX + Up * RectY;
 
     // 2) 가장 가까운 점을 점광원처럼 취급
-    float3 L;   // 표면 -> 빛
+    float3 L; // 표면 -> 빛
     const float Attenuation = GetDistanceAttenuation(ClosestPoint, Light.Radius, Light.FalloffExponent, WorldPos, L);
 
     // 3) 면의 앞쪽만 비춘다 (뒤쪽이면 0)
@@ -252,7 +310,7 @@ FLightContribution CalcRectLight(FLightRenderParameters Light, float3 N, float3 
     // Door Length가 0이면 그냥 rect (전방향)
     if (Light.BarnDoorLength > 0.0f)
     {
-        const float3 EmitterToSurface = WorldPos - ClosestPoint;     // 발광면에서 표면으로
+        const float3 EmitterToSurface = WorldPos - ClosestPoint; // 발광면에서 표면으로
         const float Distance = max(length(EmitterToSurface), 0.0001f);
         const float ForwardDist = dot(EmitterToSurface, Light.Direction);
         const float LateralX = abs(dot(EmitterToSurface, Light.Right));
@@ -322,7 +380,14 @@ float3 GetHeatmapColor(uint LightCount)
 // Directional + 로컬 라이트의 Diffuse/Specular를 모두 더한다. Ambient는 포함하지 않는다.
 // bUseLightGrid = true면 SvPosition이 속한 셀의 라이트만, false면 전체 로컬 라이트를 순회한다.
 // VS(Gouraud)는 픽셀 위치가 없어 셀을 쓸 수 없으므로 false로 호출한다.
-FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid)
+FLightContribution AccumulateDirectLighting(
+    float3 N,
+    float3 V,
+    float3 WorldPos,
+    float InShininess,
+    float4 SvPosition,
+    bool bUseLightGrid,
+    bool bReceiveShadow)
 {
     // Directional Light는 처음에 한 번만 계산
     FLightContribution Total = CalcDirectionalLight(N, V, InShininess);
@@ -346,8 +411,20 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
     {
         const uint LightIndex = bUseCellList ? CellLightIndices[CellOffset + 1 + Index] : Index;
         const FLightContribution LightContribution = CalcLocalLight(LocalLights[LightIndex], N, V, WorldPos, InShininess);
-        Total.Diffuse += LightContribution.Diffuse;
-        Total.Specular += LightContribution.Specular;
+
+        float Visibility = 1.0f;
+#if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
+        if (bReceiveShadow && LocalLights[LightIndex].Type == LIGHT_TYPE_SPOT)
+        {
+            const int ShadowIndex =
+                LocalLightShadowIndices[LightIndex];
+            
+            Visibility = CalculateSpotShadow(ShadowIndex, WorldPos);
+        }
+#endif
+        
+        Total.Diffuse += LightContribution.Diffuse * Visibility;
+        Total.Specular += LightContribution.Specular * Visibility;
     }
 
     return Total;
@@ -370,7 +447,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
     Output.Color = Input.Color;
 #if LIGHTING_MODEL_GOURAUD
     const float3 V = normalize(CameraWorldPos - Output.WorldPos);
-    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false);
+    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, false);
     Output.VertexDiffuse = Contribution.Diffuse;
 #endif
     return Output;
@@ -422,7 +499,7 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     const float3 V = { normalize(CameraWorldPos - Input.WorldPos) };
-    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, Shininess, Input.SvPosition, true) };
+    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, Shininess, Input.SvPosition, true, ReceiveShadow != 0) };
     DiffuseLighting += Contribution.Diffuse;
     SpecularLighting = Contribution.Specular;
 #elif LIGHTING_MODEL_GOURAUD

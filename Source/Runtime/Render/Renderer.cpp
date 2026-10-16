@@ -14,6 +14,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Asset/AssetManager.h"
+#include "Components/StaticMeshComponent.h"
 
 #include <algorithm>
 #include <chrono>
@@ -81,6 +82,7 @@ bool FRenderer::Init()
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 	SpotShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FSpotShadowConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
+	ShadowReceiverCB = RenderCommand::CreateConstantBuffer(sizeof(FShadowReceiverConstants));
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
 	LocalLightShadowIndexBuffer = RenderCommand::CreateDynamicStructuredBuffer(
@@ -230,6 +232,7 @@ void FRenderer::DrawStaticGroups()
 				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
 				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld());
 			}
+			BindShadowReceiver(Item.Proxy);
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
 	}
@@ -328,6 +331,8 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
 			UpdatePerObjectConstants(RenderPacket, ViewProjection);
 		}
+		
+		BindShadowReceiver(RenderPacket.Proxy);
 
 		RenderCommand::DrawIndexed(
 			RenderPacket.IndexCount ? RenderPacket.IndexCount : RenderPacket.Mesh->GetIndexBuffer(RenderPacket.LODIndex)->GetIndexCount(),
@@ -794,4 +799,30 @@ void FRenderer::BindSpotShadows()
 
 	RenderCommand::BindSamplerState(
 		1, ESamplerState::ShadowComparison, EShaderBindFlagBits::Pixel);
+}
+
+void FRenderer::BindShadowReceiver(const FPrimitiveSceneProxy* Proxy)
+{
+	if (bDepthOnly)
+		return;
+
+	FShadowReceiverConstants Constants{};
+
+	if (Proxy)
+	{
+		if (auto* Mesh =
+			Cast<UStaticMeshComponent>(Proxy->GetComponent()))
+		{
+			Constants.ReceiveShadow =
+				Mesh->IsReceivingShadow() ? 1u : 0u;
+		}
+	}
+
+	RenderCommand::UpdateBufferData(
+		ShadowReceiverCB.get(), &Constants, sizeof(Constants)
+	);
+
+	RenderCommand::BindConstantBuffer(
+		7, ShadowReceiverCB.get(), EShaderBindFlagBits::Pixel
+	);
 }

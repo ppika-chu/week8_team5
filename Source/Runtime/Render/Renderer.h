@@ -184,7 +184,11 @@ struct alignas(16) FSpotShadowConstants
 
 constexpr uint32 MaxSpotShadowCount = 4;
 
-
+struct alignas(16) FShadowReceiverConstants
+{
+	uint32 ReceiveShadow = 1;
+	uint32 Padding[3]{};
+};
 
 struct FLightRenderParameters;
 
@@ -260,6 +264,7 @@ private:
 
 	/* Shadow */
 	void BindSpotShadows();
+	void BindShadowReceiver(const FPrimitiveSceneProxy* Proxy);
 
 private:
 	// private
@@ -320,4 +325,7 @@ private:
 	int32 LocalLightShadowIndices[MaxLocalLights]{};
 
 	uint32 NumSpotShadows = 0;
+
+	TUniquePtr<FConstantBuffer> ShadowReceiverCB;
+
 };
