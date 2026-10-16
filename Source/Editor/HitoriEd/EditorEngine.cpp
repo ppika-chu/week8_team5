@@ -949,59 +949,41 @@ void UEditorEngine::UpdateGizmoAndPicking()
 // View 행렬로 Scene·Grid·Gizmo·텍스트·Outline을 렌더한다.
 void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderQueue, FRenderQueue& IconQueue, FRenderQueue& ArrowQueue)
 {
-	int32 ShadowLightIndex = INDEX_NONE;
-	FMatrix ShadowLightViewProjection = FMatrix::Identity;
-
 	const EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
-	const bool bRenderShadows = ((ViewMode == EViewMode::Lit_Lambert) || (ViewMode == EViewMode::Lit_BlinnPhong));
+	const bool bRenderShadows =
+		ViewMode == EViewMode::Lit_Lambert ||
+		ViewMode == EViewMode::Lit_BlinnPhong;
+
+	// 이전 뷰의 그림자 데이터와 텍스처 바인딩을 해제한다.
+	TArray<FSpotShadowData> EmptyShadowDatas;
+	Renderer->SetSpotShadowDatas(EmptyShadowDatas);
+	RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Pixel);
 
 	if (ShadowRenderer && bRenderShadows && SettingsPanel->GetSettings().bDrawPrimitives)
 	{
-		FScene& Scene = ViewWorld.GetScene();
-		for (uint32 LightIndex = 0; LightIndex < Scene.LocalLightProxies.Num(); ++LightIndex)
+		ShadowRenderer->Render(ViewWorld.GetScene());
+
+		FTexture2D* ShadowMap = ShadowRenderer->GetShadowMap();
+		const auto& ShadowDatas = ShadowRenderer->GetSpotShadowDatas();
+
+		if (ShadowMap && ShadowMap->GetSRV())
 		{
-			const FLocalLightSceneProxy* LightProxy = Scene.LocalLightProxies[LightIndex];
-
-			if (!LightProxy || !LightProxy->IsVisible())
+			for (const FSpotShadowData& ShadowData : ShadowDatas)
 			{
-				continue;
+				if (ShadowData.ShadowMapSlice < 0)
+				{
+					continue;
+				}
+
+				RenderCommand::BindShaderResource(13, ShadowMap, EShaderBindFlagBits::Pixel);
+				Renderer->SetSpotShadowDatas(ShadowDatas);
+
+				break;
 			}
-
-			if (LightProxy->GetLightComponent()->GetLightType() != ELightType::Spot)
-			{
-				continue;
-			}
-
-			const auto* SpotLightProxy = static_cast<const FSpotLightSceneProxy*>(LightProxy);
-			const FMatrix LightViewProjection = SpotLightProxy->GetShadowViewMatrix() * SpotLightProxy->GetShadowProjectionMatrix();
-			
-			ShadowRenderer->Render(LightViewProjection, Scene);
-
-			ShadowLightIndex = static_cast<int32>(LightIndex);
-			ShadowLightViewProjection = LightViewProjection;
-
-			break;
 		}
 	}
 
-	FShadowConstants ShadowConstants{};
-	ShadowConstants.ShadowLightIndex = ShadowLightIndex;
-	ShadowConstants.ShadowLightViewProjection = ShadowLightViewProjection;
-
-	FTexture2D* ShadowMap = ShadowRenderer ? ShadowRenderer->GetShadowMap() : nullptr;
-
-	if (ShadowLightIndex >= 0 && ShadowMap && ShadowMap->GetSRV())
-	{
-		RenderCommand::BindShaderResource(13, ShadowMap, EShaderBindFlagBits::Pixel);
-	}
-	else
-	{
-		ShadowConstants.ShadowLightIndex = INDEX_NONE;
-
-		RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Pixel);
-	}
-
-	Renderer->SetShadowConstants(ShadowConstants);
+	Renderer->SetShadowConstants(FShadowConstants{});
 
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
 

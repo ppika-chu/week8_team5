@@ -51,9 +51,7 @@ public:
 
 
 	static void BindPipelineState(const FPipelineState& PipelineState);
-
 	static void BindMesh(UStaticMesh* Mesh, uint32 LODIndex = 0);
-
 	static void BindShaderProgram(FShaderProgram* Shader);
 
 	static void Draw(uint32 VertexCount, uint32 StartIndexLocation = 0);

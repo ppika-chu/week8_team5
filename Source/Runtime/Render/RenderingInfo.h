@@ -48,4 +48,6 @@ struct FRenderingInfo
 	FViewportSettings ViewportSetting;
 	TArray<FRenderingDesc> ColorRenderTargets;
 	FRenderingDesc DepthStencil;
+
+	int32 DepthStencilSlice = -1;
 };

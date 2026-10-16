@@ -84,6 +84,8 @@ bool FRenderer::Init()
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
+	SpotShadowDataBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FSpotShadowData), MaxLocalLights);
+
 	const FLightGridConstants GridConstants{};
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 	RenderCommand::UpdateBufferData(GridLightingFallbackCB.get(), &GridConstants, sizeof(FLightGridConstants));
@@ -621,8 +623,35 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 
 void FRenderer::SetShadowConstants(const FShadowConstants& Constants)
 {
-	RenderCommand::UpdateBufferData(ShadowCB.get(), &Constants);
+	FShadowConstants UploadConstants = Constants;
+	UploadConstants.NumSpotShadowDatas = NumSpotShadowDatasThisView;
+
+	RenderCommand::UpdateBufferData(ShadowCB.get(), &UploadConstants);
 	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel);
+}
+
+void FRenderer::SetSpotShadowDatas(const TArray<FSpotShadowData>& ShadowDatas)
+{
+	NumSpotShadowDatasThisView = 0;
+
+	constexpr uint32 bindResourceIndex = 14;
+
+	RenderCommand::UnbindShaderResource(bindResourceIndex, EShaderBindFlagBits::Pixel);
+	if (!SpotShadowDataBuffer
+		|| !SpotShadowDataBuffer->GetBuffer()
+		|| !SpotShadowDataBuffer->GetSRV())
+	{
+		return;
+	}
+
+	NumSpotShadowDatasThisView = std::min<uint32>(ShadowDatas.Num(), SpotShadowDataBuffer->GetMaxCount()); 
+	if (NumSpotShadowDatasThisView == 0)
+	{
+		return;
+	}
+
+	RenderCommand::UpdateBufferData(SpotShadowDataBuffer.get(), ShadowDatas.GetData(), NumSpotShadowDatasThisView * sizeof(FSpotShadowData));
+	RenderCommand::BindShaderResource(bindResourceIndex, SpotShadowDataBuffer.get(), EShaderBindFlagBits::Pixel);
 }
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)
@@ -638,7 +667,8 @@ void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint3
 		return;
 	}
 
-	float NearZ, FarZ; bool bOrtho;
+	float NearZ, FarZ; 
+	bool bOrtho;
 	ExtractDepthRange(Projection, NearZ, FarZ, bOrtho);
 
 	// Tiled는 슬라이스 1개짜리 Clustered로 돌린다. 2.5D는 같은 형식(슬라이스 1개)을 깊이 버퍼로 채우는 별도 CS다.

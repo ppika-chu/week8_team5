@@ -10,6 +10,8 @@
 #include "RenderEnums.h"
 #include "Material.h"
 
+#include "ShadowRenderer.h"
+
 constexpr uint32 ObjectSlotBytes = 256;
 
 enum class ELightCullingMode : uint32 { Tiled, Clustered, Tiled25D };
@@ -103,12 +105,11 @@ struct alignas(16) FLightingConstants
 	uint32 Padding[3];
 };
 
+// Todo: Shadow map
 struct alignas(16) FShadowConstants
 {
-	FMatrix ShadowLightViewProjection = FMatrix::Identity;
-	int32 ShadowLightIndex = INDEX_NONE;
-	float ShadowBias = 0.001f;
-	float Padding[2];
+	uint32 NumSpotShadowDatas = 0;
+	uint32 CountPadding[3];
 };
 
 static_assert(sizeof(FLightingConstants) == 64);
@@ -118,7 +119,7 @@ static_assert(sizeof(FDirectionalLightInfo) == 32);
 static_assert(sizeof(FPointLightInfo) == 48);
 static_assert(sizeof(FSpotLightInfo) == 64);
 static_assert(sizeof(FRectLightInfo) == 80);
-static_assert(sizeof(FShadowConstants) == 80);
+static_assert(sizeof(FShadowConstants) == 16);
 
 //static_assert(sizeof(FLightingConstants) == 512);	// UberLit.hlsl cbuffer Lighting 크기 (fxc 리플렉션 기준)
 
@@ -232,6 +233,7 @@ public:
 	//void SetFireBallLight(const FFireBallLightConstants& LightConstants);
 	void SetLighting(FLightingConstants& LightingConstants, const TArray<FLightRenderParameters>& InLocalLights);
 	void SetShadowConstants(const FShadowConstants& Constants);
+	void SetSpotShadowDatas(const TArray<FSpotShadowData>& ShadowDatas);
 
 	// 이후 그리는 UberLit 머티리얼이 쓸 조명 모델. View마다 RenderOpaque 전에 설정한다.
 	void SetViewMode(EViewMode InViewMode);
@@ -244,6 +246,7 @@ public:
 	void SetLightDebugMode(uint32 Mode);
 	void SetLightCullingMode(ELightCullingMode Mode) { LightCullingMode = Mode; }
 	ELightCullingMode GetLightCullingMode() const { return LightCullingMode; }
+
 private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection);
 	void DrawStaticGroups();
@@ -303,6 +306,10 @@ private:
 	TUniquePtr<FStructuredBuffer> TileIndexBuffer{};
 	TUniquePtr<FStructuredBuffer> LocalLightBuffer{};
 	uint32 NumLocalLightsThisFrame = 0;
+
+	// Todo: Shadow map
+	TUniquePtr<FStructuredBuffer> SpotShadowDataBuffer;
+	uint32 NumSpotShadowDatasThisView = 0;
 
 	EViewMode CurrentViewMode = EViewMode::Lit_Lambert;
 };

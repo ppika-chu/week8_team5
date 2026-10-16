@@ -113,12 +113,17 @@ cbuffer LightGrid : register(b5)
 
 cbuffer ShadowConstants : register(b6)
 {
-    float4x4 ShadowLightViewProjection;
-    int ShadowLightIndex;
-    float ShadowBias;
-    float2 ShadowPadding;
+    uint NumSpotShadowDatas;
+    uint3 ShadowCountPadding;
 };
 
+struct FSpotShadowData
+{
+    float4x4 ShadowLightViewProjection;
+    int ShadowMapSlice;
+    float ShadowBias;
+    float2 Padding;
+};
 
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
@@ -128,7 +133,8 @@ Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
 SamplerState MaterialSampler : register(s0);
 
-Texture2D<float> SpotShadowMap : register(t13);
+Texture2DArray<float> SpotShadowMaps : register(t13);
+StructuredBuffer<FSpotShadowData> SpotShadowDatas : register(t14);
 
 struct VS_INPUT
 {
@@ -160,13 +166,12 @@ struct FLightContribution
     float3 Specular;
 };
 
-bool TryGetShadowCoordinates(float3 WorldPos, out float2 ShadowUV, out float ShadowDepth)
+bool TryGetShadowCoordinates(float3 WorldPos, float4x4 LightViewProjection, out float2 ShadowUV, out float ShadowDepth)
 {
     ShadowUV = float2(0.0f, 0.0f);
     ShadowDepth = 0.0f;
 
-    const float4 ShadowClip = mul(float4(WorldPos, 1.0f), ShadowLightViewProjection);
-
+    const float4 ShadowClip = mul(float4(WorldPos, 1.0f), LightViewProjection);
     if (ShadowClip.w <= 0.0f)
     {
         return false;
@@ -182,9 +187,15 @@ bool TryGetShadowCoordinates(float3 WorldPos, out float2 ShadowUV, out float Sha
         && ShadowDepth <= 1.0f;
 }
 
-float GetSpotShadowVisibility(float3 WorldPos)
+float GetSpotShadowVisibility(uint LightIndex, float3 WorldPos)
 {
-    if (ShadowLightIndex < 0)
+    if (LightIndex >= NumSpotShadowDatas)
+    {
+        return 1.0f;
+    }
+
+    const FSpotShadowData ShadowData = SpotShadowDatas[LightIndex];
+    if (ShadowData.ShadowMapSlice < 0)
     {
         return 1.0f;
     }
@@ -192,19 +203,21 @@ float GetSpotShadowVisibility(float3 WorldPos)
     float2 ShadowUV;
     float ShadowDepth;
 
-    if (TryGetShadowCoordinates(WorldPos, ShadowUV, ShadowDepth) == false) 
+    if (!TryGetShadowCoordinates(WorldPos, ShadowData.ShadowLightViewProjection, ShadowUV, ShadowDepth))
     {
         return 1.0f;
     }
 
-    uint Width;
-    uint Height;
-    SpotShadowMap.GetDimensions(Width, Height);
+    uint Width, Height, SliceCount;
+    SpotShadowMaps.GetDimensions(Width, Height, SliceCount);
+
+    if ((uint) ShadowData.ShadowMapSlice >= SliceCount)
+        return 1.0f;
 
     const uint2 ShadowTexel = min((uint2) (ShadowUV * float2(Width, Height)), uint2(Width - 1, Height - 1));
-    const float StoredDepth = SpotShadowMap.Load(int3(ShadowTexel, 0));
+    const float StoredDepth = SpotShadowMaps.Load(int4(ShadowTexel, ShadowData.ShadowMapSlice, 0));
 
-    return ShadowDepth <= StoredDepth + ShadowBias ? 1.0f : 0.0f;
+    return (ShadowDepth <= StoredDepth + ShadowData.ShadowBias) ? 1.0f : 0.0f;
 }
 
 // 원뿔 감쇠량. 0(Outer 밖) ~ 1(Inner 안)
@@ -222,8 +235,6 @@ float GetDistanceAttenuation(float3 LightPos, float AttenuationRadius, float Fal
     // 거리가 Radius에 가까울수록 0으로
     return pow(saturate(1.0f - Distance / max(AttenuationRadius, 0.001f)), max(FalloffExponent, 0.001f));
 }
-
-
 
 // 라이트 하나의 Diffuse와 Specular를 구한다. Radiance = Color * Intensity * Attenuation (* ConeAttenuation)
 FLightContribution SurfaceShading(float3 N, float3 L, float3 V, float3 Radiance, float InShininess)
@@ -404,10 +415,19 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
         FLightContribution LightContribution = CalcLocalLight(LocalLights[LightIndex], N, V, WorldPos, InShininess);
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
+        /*
         if (ShadowLightIndex >= 0 && LightIndex == (uint) ShadowLightIndex && LocalLights[LightIndex].Type == LIGHT_TYPE_SPOT)
         {
             const float Visibility = GetSpotShadowVisibility(WorldPos);
 
+            LightContribution.Diffuse *= Visibility;
+            LightContribution.Specular *= Visibility;
+        }
+        */
+        
+        if (LocalLights[LightIndex].Type == LIGHT_TYPE_SPOT)
+        {
+            const float Visibility = GetSpotShadowVisibility(LightIndex, WorldPos);
             LightContribution.Diffuse *= Visibility;
             LightContribution.Specular *= Visibility;
         }
