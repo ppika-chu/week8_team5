@@ -1049,7 +1049,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 				/* Prepare Shadow Target */
 				FShadowInfo ShadowInfo =
 					Scene.GetShadowMapManager().GetShadowInfo(
-						SpotLight->GetUUID()
+						SpotLight->GetUUID(),
+						SettingsPanel->GetSettings().ShadowMapResolution
 					);
 
 				if (!ShadowInfo.ShadowMap.Texture ||

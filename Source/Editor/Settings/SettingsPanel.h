@@ -21,6 +21,7 @@ struct FEditorSettings
 	bool bDrawPSGrid = false;
 	bool bEnableFXAA = true;
 	float Exposure = 1.0f;	// 톤 매핑 전에 HDR 색에 곱하는 노출 값
+	uint32 ShadowMapResolution = 1024;
 	bool bDepthView = false;
 	bool bExponentialHeightFog = true;
 	

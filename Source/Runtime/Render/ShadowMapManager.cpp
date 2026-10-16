@@ -7,15 +7,28 @@ constexpr uint32 DefaultShadowMapResolution = 1024;
 
 FTexture2D* FShadowMapManager::GetOrCreateShadowMap(uint32 LightID)
 {
+	return GetOrCreateShadowMap(LightID, DefaultShadowMapResolution);
+}
+
+FTexture2D* FShadowMapManager::GetOrCreateShadowMap(uint32 LightID, uint32 Resolution)
+{
 	if (auto* ShadowMap = ShadowMaps.Find(LightID))
 	{
-		return ShadowMap->get();
+		if (ShadowMap->get()->GetWidth() != Resolution ||
+			ShadowMap->get()->GetHeight() != Resolution)
+		{
+			ShadowMaps.Remove(LightID);
+		}
+		else
+		{
+			return ShadowMap->get();
+		}
 	}
 
 	// Create a new shadow map resource
 	D3D11_TEXTURE2D_DESC TextureDesc{
-		.Width = DefaultShadowMapResolution,
-		.Height = DefaultShadowMapResolution,
+		.Width = Resolution,
+		.Height = Resolution,
 		.MipLevels = 1,
 		.ArraySize = 1,
 		.Format = DXGI_FORMAT_R24G8_TYPELESS,
@@ -53,17 +66,17 @@ FTexture2D* FShadowMapManager::GetShadowMapOrNull(uint32 LightID) const
 	return nullptr;
 }
 
-FShadowInfo FShadowMapManager::GetShadowInfo(uint32 LightID)
-{
+FShadowInfo FShadowMapManager::GetShadowInfo(uint32 LightID, uint32 Resolution)
+{	
 	FShadowInfo Info;
-	if (FTexture2D* ShadowMap = GetOrCreateShadowMap(LightID))
+	if (FTexture2D* ShadowMap = GetOrCreateShadowMap(LightID, Resolution))
 	{
 		Info.ShadowMap.Texture = ShadowMap;
 		Info.ShadowMap.LoadOp = ERenderTargetLoadOp::Clear;
 		Info.ShadowMap.StoreOp = ERenderTargetStoreOp::Store;
 		Info.ShadowMap.ClearValue.DepthClearValue = 1.0f;
 		Info.ShadowMap.ClearValue.StencilClearValue = 0;
-		Info.resolution = DefaultShadowMapResolution;
+		Info.resolution = Resolution;
 	}
 	else
 	{
