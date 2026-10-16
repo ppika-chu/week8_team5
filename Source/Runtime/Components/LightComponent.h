@@ -7,6 +7,13 @@ class ULightComponent : public ULightComponentBase
 {
 	DECLARE_CLASS(ULightComponent, ULightComponentBase)
 	REFLECT_START(ULightComponent)
+		PROPERTY(ShadowResoulutionScale)
+		PROPERTY(ShadowBias)
+		PROPERTY(ShadowSlopeBias)
+		PROPERTY(ShadowSharpen)
+		PROPERTY(ShadowAngle)
+		PROPERTY(ShadowNearPlane)
+		PROPERTY(ShadowFarPlane)
 	REFLECT_END()
 public:
 	ULightComponent();
