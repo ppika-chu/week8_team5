@@ -35,6 +35,8 @@ public:
 
 	void Clear();
 
+	const FBox& GetRootBounds() const { return RootBounds; }
+
 private:
 	static constexpr uint32 InvalidIndex = std::numeric_limits<uint32>::max();
 	static constexpr uint32 MaxDepth = 32;

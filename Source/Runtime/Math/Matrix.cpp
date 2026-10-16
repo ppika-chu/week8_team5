@@ -109,6 +109,22 @@ FMatrix FMatrix::MakeTranslation(const FVector& T)
 	return Mat;
 }
 
+FMatrix FMatrix::MakeOrthographic(float Width, float Height, float NearZ, float FarZ)
+{
+    const float XScale = 2.0f / Width;
+    const float YScale = 2.0f / Height;
+
+    const float ZScale = 1.0f / (FarZ - NearZ);
+    const float ZOffset = -NearZ / (FarZ - NearZ);
+
+    return FMatrix(
+        0.0f, 0.0f, ZScale, 0.0f,
+        XScale, 0.0f, 0.0f, 0.0f,
+        0.0f, YScale, 0.0f, 0.0f,
+        0.0f, 0.0f, ZOffset, 1.0f
+    );
+}
+
 FVector4 FMatrix::TransformFVector4(const FVector4& V) const
 {
 	FMatrixRegister MReg = FMatrixRegister::Load(*this);

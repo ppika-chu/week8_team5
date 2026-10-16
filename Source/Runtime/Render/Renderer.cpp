@@ -80,6 +80,16 @@ bool FRenderer::Init()
 	LightCullingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightCullingConstants));
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
+	ShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FShadowConstants));
+
+	D3D11_TEXTURE2D_DESC Desc{};
+	Desc.Width = Desc.Height = 2048;
+	Desc.MipLevels = 1; Desc.ArraySize = 1;
+	Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+	Desc.SampleDesc.Count = 1;
+	Desc.Usage = D3D11_USAGE_DEFAULT;
+	Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+	ShadowMap = RenderCommand::CreateTexture2D(Desc);
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
 	const FLightGridConstants GridConstants{};
@@ -616,6 +626,13 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 	GridConstants.LightDebugMode = LightDebugMode;
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 }
+
+void FRenderer::SetShadow(const FShadowConstants& ShadowConstants)
+{	
+	ShadowData = ShadowConstants; 
+	RenderCommand::UpdateBufferData(ShadowCB.get(), &ShadowConstants, sizeof(FShadowConstants));
+}
+
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)
 {
