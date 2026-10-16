@@ -1012,7 +1012,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
 			case static_cast<uint32>(ELightType::Spot):
 			{
-				if (RenderedSpotShadowCount >= MAxSpotShadowCount)
+				if (RenderedSpotShadowCount >= MaxSpotShadowCount)
 					continue;
 
 				const USpotLightComponent* SpotLight = Cast<USpotLightComponent>(Light);

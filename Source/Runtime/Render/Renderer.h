@@ -182,7 +182,7 @@ struct alignas(16) FSpotShadowConstants
 	FVector4 ShadowBias; // x, y, z, w are bias of each slot
 };
 
-constexpr uint32 MAxSpotShadowCount = 4;
+constexpr uint32 MaxSpotShadowCount = 4;
 
 
 
@@ -316,7 +316,7 @@ private:
 	TUniquePtr<FStructuredBuffer> LocalLightShadowIndexBuffer;
 
 	FSpotShadowConstants SpotShadowConstants{};
-	FTexture2D* SpotShadowTextures[MAxSpotShadowCount]{};
+	FTexture2D* SpotShadowTextures[MaxSpotShadowCount]{};
 	int32 LocalLightShadowIndices[MaxLocalLights]{};
 
 	uint32 NumSpotShadows = 0;

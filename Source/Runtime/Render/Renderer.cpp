@@ -724,7 +724,7 @@ void FRenderer::ResetSpotShadows()
 	NumSpotShadows = 0;
 	SpotShadowConstants = {};
 
-	for (uint32 i = 0; i < MAxSpotShadowCount; ++i)
+	for (uint32 i = 0; i < MaxSpotShadowCount; ++i)
 	{
 		SpotShadowTextures[i] = nullptr;
 
@@ -746,7 +746,7 @@ void FRenderer::AddSpotShadow(
 )
 {
 	assert(LocalLightIndex < MaxLocalLights);
-	assert(NumSpotShadows < MAxSpotShadowCount);
+	assert(NumSpotShadows < MaxSpotShadowCount);
 	assert(Texture && Texture->GetSRV());
 
 	const uint32 ShadowIndex = NumSpotShadows++;
@@ -780,8 +780,8 @@ void FRenderer::BindSpotShadows()
 	RenderCommand::BindShaderResource(
 		15, LocalLightShadowIndexBuffer.get(), EShaderBindFlagBits::Pixel);
 
-	ID3D11ShaderResourceView* SRVs[MAxSpotShadowCount]{};
-	for (uint32 i = 0; i < MAxSpotShadowCount; ++i)
+	ID3D11ShaderResourceView* SRVs[MaxSpotShadowCount]{};
+	for (uint32 i = 0; i < MaxSpotShadowCount; ++i)
 	{
 		SRVs[i] = SpotShadowTextures[i]
 			? SpotShadowTextures[i]->GetSRV()
@@ -789,7 +789,7 @@ void FRenderer::BindSpotShadows()
 	}
 
 	RenderCommand::GetContext()->PSSetShaderResources(
-		16, MAxSpotShadowCount, SRVs);
+		16, MaxSpotShadowCount, SRVs);
 
 
 	RenderCommand::BindSamplerState(
