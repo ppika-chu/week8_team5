@@ -111,6 +111,15 @@ cbuffer LightGrid : register(b5)
     uint2 LightGridPadding;
 };
 
+cbuffer ShadowConstants : register(b6)
+{
+    float4x4 ShadowLightViewProjection;
+    int ShadowLightIndex;
+    float ShadowBias;
+    float2 ShadowPadding;
+};
+
+
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
 StructuredBuffer<uint> CellLightIndices : register(t12);
@@ -118,6 +127,8 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
 SamplerState MaterialSampler : register(s0);
+
+Texture2D<float> SpotShadowMap : register(t13);
 
 struct VS_INPUT
 {
@@ -148,6 +159,53 @@ struct FLightContribution
     float3 Diffuse;
     float3 Specular;
 };
+
+bool TryGetShadowCoordinates(float3 WorldPos, out float2 ShadowUV, out float ShadowDepth)
+{
+    ShadowUV = float2(0.0f, 0.0f);
+    ShadowDepth = 0.0f;
+
+    const float4 ShadowClip = mul(float4(WorldPos, 1.0f), ShadowLightViewProjection);
+
+    if (ShadowClip.w <= 0.0f)
+    {
+        return false;
+    }
+
+    const float3 ShadowNDC = ShadowClip.xyz / ShadowClip.w;
+    ShadowUV = ShadowNDC.xy * float2(0.5f, -0.5f) + 0.5f;
+    ShadowDepth = ShadowNDC.z;
+
+    return all(ShadowUV >= 0.0f)
+        && all(ShadowUV <= 1.0f)
+        && ShadowDepth >= 0.0f
+        && ShadowDepth <= 1.0f;
+}
+
+float GetSpotShadowVisibility(float3 WorldPos)
+{
+    if (ShadowLightIndex < 0)
+    {
+        return 1.0f;
+    }
+
+    float2 ShadowUV;
+    float ShadowDepth;
+
+    if (TryGetShadowCoordinates(WorldPos, ShadowUV, ShadowDepth) == false) 
+    {
+        return 1.0f;
+    }
+
+    uint Width;
+    uint Height;
+    SpotShadowMap.GetDimensions(Width, Height);
+
+    const uint2 ShadowTexel = min((uint2) (ShadowUV * float2(Width, Height)), uint2(Width - 1, Height - 1));
+    const float StoredDepth = SpotShadowMap.Load(int3(ShadowTexel, 0));
+
+    return ShadowDepth <= StoredDepth + ShadowBias ? 1.0f : 0.0f;
+}
 
 // 원뿔 감쇠량. 0(Outer 밖) ~ 1(Inner 안)
 float GetSpotConeAttenuation(FLightRenderParameters Light, float3 L)
@@ -329,6 +387,7 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
         }
     }
 
+    /*
     for (uint Index = 0; Index < LightCount; ++Index)
     {
         const uint LightIndex = bUseCellList ? CellLightIndices[CellOffset + 1 + Index] : Index;
@@ -336,7 +395,28 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
         Total.Diffuse += LightContribution.Diffuse;
         Total.Specular += LightContribution.Specular;
     }
+    */
+    
+    for (uint Index = 0; Index < LightCount; ++Index)
+    {
+        const uint LightIndex = (bUseCellList ? CellLightIndices[CellOffset + 1 + Index] : Index);
 
+        FLightContribution LightContribution = CalcLocalLight(LocalLights[LightIndex], N, V, WorldPos, InShininess);
+
+#if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
+        if (ShadowLightIndex >= 0 && LightIndex == (uint) ShadowLightIndex && LocalLights[LightIndex].Type == LIGHT_TYPE_SPOT)
+        {
+            const float Visibility = GetSpotShadowVisibility(WorldPos);
+
+            LightContribution.Diffuse *= Visibility;
+            LightContribution.Specular *= Visibility;
+        }
+#endif
+
+        Total.Diffuse += LightContribution.Diffuse;
+        Total.Specular += LightContribution.Specular;
+    }
+    
     return Total;
 }
 

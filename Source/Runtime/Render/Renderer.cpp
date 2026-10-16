@@ -77,6 +77,8 @@ bool FRenderer::Init()
 	ViewCB = RenderCommand::CreateConstantBuffer(sizeof(FViewConstants));
 	// FireBallLightCB = RenderCommand::CreateConstantBuffer(sizeof(FFireBallLightConstants));
 	LightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightingConstants));
+	ShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FShadowConstants));
+
 	LightCullingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightCullingConstants));
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
@@ -615,6 +617,12 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 	FLightGridConstants GridConstants{};
 	GridConstants.LightDebugMode = LightDebugMode;
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
+}
+
+void FRenderer::SetShadowConstants(const FShadowConstants& Constants)
+{
+	RenderCommand::UpdateBufferData(ShadowCB.get(), &Constants);
+	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel);
 }
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)

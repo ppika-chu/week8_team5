@@ -15,7 +15,7 @@
 #include "Render/FXAARenderer.h"
 #include "Render/ToneMapRenderer.h"
 #include "Render/DepthViewRenderer.h"
-
+#include "ShadowRenderer.h"
 
 #include "Editor/EditorUI/EditorUI.h"
 #include "Editor/OutputLog/OutputLogPanel.h"
@@ -34,6 +34,7 @@
 
 #include "PlayInEditorDataTypes.h"
 #include "Core/Misc/Optional.h"
+
 
 //Temp
 #include "Text/Font.h"
@@ -150,6 +151,7 @@ private:
 	TUniquePtr<FFXAARenderer> FXAARenderer;
 	TUniquePtr<FToneMapRenderer> ToneMapRenderer;
 	TUniquePtr<FDepthViewRenderer> DepthViewRenderer;
+	TUniquePtr<FShadowRenderer> ShadowRenderer;
 
 	UFont* SystemFont;
 
