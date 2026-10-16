@@ -111,9 +111,18 @@ cbuffer LightGrid : register(b5)
     uint2 LightGridPadding;
 };
 
+cbuffer ShadowConstants : register(b6)
+{
+    matrix LightViewProj;
+    float ShadowBias;
+    uint bShadowEnabled;
+    float2 ShadowPadding;
+};
+
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
 StructuredBuffer<uint> CellLightIndices : register(t12);
+Texture2D<float> ShadowMap : register(t13);     // 0 ~ 1 깊이
 
 Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
@@ -191,6 +200,26 @@ FLightContribution SurfaceShading(float3 N, float3 L, float3 V, float3 Radiance,
 float3 GetAmbientLighting()
 {
     return Ambient.Color * Ambient.Intensity;
+}
+
+// return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
+float CalcDirectionalShadow(float3 WorldPos)
+{
+    if (!bShadowEnabled) return 1.0f;
+
+    const float4 LightClip = mul(float4(WorldPos, 1.0f), LightViewProj);
+    const float3 Ndc = LightClip.xyz / LightClip.w;
+    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
+
+    // any() : 벡터 성분 중 하나라도 참이면 true
+    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f) return 1.0f;      // Shadow Map 밖이면 빛을 받는 것으로 간주
+
+    uint Width, Height;
+
+    ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 함수
+    const uint2 Texel = min(uint2(UV * float2(Width, Height)), uint2(Width-1, Height-1));    // UV = 1.0 이면 텍셀 밖이므로 clamp
+    const float MapDepth = ShadowMap.Load(int3(Texel, 0));
+    return (Ndc.z - ShadowBias > MapDepth)? 0.0f : 1.0f;
 }
 
 // Directional Light의 영향을 구한다
@@ -313,6 +342,9 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
 {
     // Directional Light는 처음에 한 번만 계산
     FLightContribution Total = CalcDirectionalLight(N, V, InShininess);
+    const float DirectionalShadow = CalcDirectionalShadow(WorldPos);
+    Total.Diffuse *= DirectionalShadow;
+    Total.Specular *= DirectionalShadow;
 
     uint LightCount = NumLocalLights;
     uint CellOffset = 0;

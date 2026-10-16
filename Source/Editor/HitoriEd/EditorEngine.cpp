@@ -911,6 +911,9 @@ void UEditorEngine::RenderShadowPass()
 	ShadowInfo.DepthStencil.Texture = ShadowMap;
 	ShadowInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;		// 깊이 1.0으로 Clear
 
+	// ShadowMap이 SRV로 묶여 있으므로 DSV 전환 전 UnBind
+	RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
+
 	RenderCommand::BeginRenderPass(ShadowInfo);
 	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
 	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
