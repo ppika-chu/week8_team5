@@ -22,6 +22,10 @@ public:
 	FLightSceneProxy* SceneProxy = nullptr;
 
 	/* Getter */
+	float GetShadowResoulutionScale() const { return ShadowResoulutionScale; }
+	float GetShadowBias() const { return ShadowBias; }
+	float GetShadowSlopeBias() const { return ShadowSlopeBias; }
+	float GetShadowSharpen() const { return ShadowSharpen; }
 	float GetShadowAngle() const { return ShadowAngle; }
 	float GetShadowNearPlane() const { return ShadowNearPlane; }
 	float GetShadowFarPlane() const { return ShadowFarPlane; }

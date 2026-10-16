@@ -26,6 +26,13 @@ struct FLightSceneInfo
 	
 };
 
+struct FShadowBinding
+{
+	uint32 LightID;
+	FTexture2D* Texture;
+	FMatrix ViewProjection;
+};
+
 class FScene
 {
 public:

@@ -79,9 +79,14 @@ bool FRenderer::Init()
 	LightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightingConstants));
 	LightCullingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightCullingConstants));
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
+	SpotShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FSpotShadowConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
+	LocalLightShadowIndexBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(int32), MaxLocalLights);
+	ResetSpotShadows();
+
 	const FLightGridConstants GridConstants{};
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 	RenderCommand::UpdateBufferData(GridLightingFallbackCB.get(), &GridConstants, sizeof(FLightGridConstants));
@@ -168,6 +173,9 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 	RenderCommand::BindShaderResource(10, LocalLightBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 	RenderCommand::BindShaderResource(12, TileIndexBuffer.get(), EShaderBindFlagBits::Pixel);
 	RenderCommand::BindConstantBuffer(5, GridLightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+	/* Shadow */
+	BindSpotShadows();
 
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
@@ -709,4 +717,81 @@ void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint3
 void FRenderer::SetLightDebugMode(uint32 Mode)
 {
 	LightDebugMode = Mode;
+}
+
+void FRenderer::ResetSpotShadows()
+{
+	NumSpotShadows = 0;
+	SpotShadowConstants = {};
+
+	for (uint32 i = 0; i < MAxSpotShadowCount; ++i)
+	{
+		SpotShadowTextures[i] = nullptr;
+
+		RenderCommand::UnbindShaderResource(16 + i, EShaderBindFlagBits::Pixel);
+
+	}
+
+	for (uint32 i = 0; i < MaxLocalLights; ++i)
+	{
+		LocalLightShadowIndices[i] = -1;
+	}
+}
+
+void FRenderer::AddSpotShadow(
+	uint32 LocalLightIndex,
+	FTexture2D* Texture,
+	const FMatrix& ViewProjection,
+	float Bias
+)
+{
+	assert(LocalLightIndex < MaxLocalLights);
+	assert(NumSpotShadows < MAxSpotShadowCount);
+	assert(Texture && Texture->GetSRV());
+
+	const uint32 ShadowIndex = NumSpotShadows++;
+
+	SpotShadowTextures[ShadowIndex] = Texture;
+	SpotShadowConstants.ViewProjection[ShadowIndex] = ViewProjection;
+	SpotShadowConstants.ShadowBias.V[ShadowIndex] = Bias;
+
+	LocalLightShadowIndices[LocalLightIndex] =
+		static_cast<int32>(ShadowIndex);
+}
+
+void FRenderer::UploadSpotShadows()
+{
+	RenderCommand::UpdateBufferData(
+		SpotShadowCB.get(),
+		&SpotShadowConstants,
+		sizeof(SpotShadowConstants));
+
+	RenderCommand::UpdateBufferData(
+		LocalLightShadowIndexBuffer.get(),
+		LocalLightShadowIndices,
+		sizeof(int32) * MaxLocalLights);
+}
+
+void FRenderer::BindSpotShadows()
+{
+	RenderCommand::BindConstantBuffer(
+		6, SpotShadowCB.get(), EShaderBindFlagBits::Pixel);
+
+	RenderCommand::BindShaderResource(
+		15, LocalLightShadowIndexBuffer.get(), EShaderBindFlagBits::Pixel);
+
+	ID3D11ShaderResourceView* SRVs[MAxSpotShadowCount]{};
+	for (uint32 i = 0; i < MAxSpotShadowCount; ++i)
+	{
+		SRVs[i] = SpotShadowTextures[i]
+			? SpotShadowTextures[i]->GetSRV()
+			: nullptr;
+	}
+
+	RenderCommand::GetContext()->PSSetShaderResources(
+		16, MAxSpotShadowCount, SRVs);
+
+
+	RenderCommand::BindSamplerState(
+		1, ESamplerState::ShadowComparison, EShaderBindFlagBits::Pixel);
 }

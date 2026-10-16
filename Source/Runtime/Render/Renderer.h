@@ -176,6 +176,16 @@ struct alignas(16) FLightGridConstants
 };
 static_assert(sizeof(FLightGridConstants) == 48, "UberLit의 cbuffer LightGrid와 같아야 한다");
 
+struct alignas(16) FSpotShadowConstants
+{
+	FMatrix ViewProjection[4];
+	FVector4 ShadowBias; // x, y, z, w are bias of each slot
+};
+
+constexpr uint32 MAxSpotShadowCount = 4;
+
+
+
 struct FLightRenderParameters;
 
 class FRenderer
@@ -233,6 +243,11 @@ public:
 	void SetLightDebugMode(uint32 Mode);
 	void SetLightCullingMode(ELightCullingMode Mode) { LightCullingMode = Mode; }
 	ELightCullingMode GetLightCullingMode() const { return LightCullingMode; }
+
+	/* Shadow */
+	void AddSpotShadow(uint32 LocalLightIndex, FTexture2D* Texture, const FMatrix& ViewProjection, float Bias);
+	void ResetSpotShadows();
+	void UploadSpotShadows();
 private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection);
 	void DrawStaticGroups();
@@ -242,6 +257,9 @@ private:
 	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);
 	void EnsurePerObjectSlotCapacity(uint32 SlotCount);
 	void UploadPerObjectConstants();
+
+	/* Shadow */
+	void BindSpotShadows();
 
 private:
 	// private
@@ -292,4 +310,14 @@ private:
 	uint32 NumLocalLightsThisFrame = 0;
 
 	EViewMode CurrentViewMode = EViewMode::Lit_Lambert;
+
+	/* Shadow */
+	TUniquePtr<FConstantBuffer> SpotShadowCB;
+	TUniquePtr<FStructuredBuffer> LocalLightShadowIndexBuffer;
+
+	FSpotShadowConstants SpotShadowConstants{};
+	FTexture2D* SpotShadowTextures[MAxSpotShadowCount]{};
+	int32 LocalLightShadowIndices[MaxLocalLights]{};
+
+	uint32 NumSpotShadows = 0;
 };

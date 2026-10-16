@@ -119,6 +119,19 @@ Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
 SamplerState MaterialSampler : register(s0);
 
+/* Shadow */
+StructuredBuffer<int> LocalLightShadowIndices : register(t15);
+
+cbuffer SpotShadowConstants : register(b6)
+{
+    matrix ShadowviewProjection[4];
+    float4 ShadowBias;
+};
+
+// t16-t19
+Texture2D<float> SpotShadowMap : register(t16);
+SamplerComparisonState ShadowSampler : register(s1);
+
 struct VS_INPUT
 {
     float3 Position : POSITION;

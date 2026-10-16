@@ -553,9 +553,9 @@ FWorldContext* UEditorEngine::GetPIEWorldContext(int32 WorldPIEInstance)
 }
 
 void UEditorEngine::RenderShadowPass(
-	const FRenderingInfo& ShadowRenderingInfo, 
-	const FMatrix& LightViewProjection, 
-	const FVector& LightPosition, 
+	const FRenderingInfo& ShadowRenderingInfo,
+	const FMatrix& LightViewProjection,
+	const FVector& LightPosition,
 	FRenderQueue& ShadowQueue)
 {
 	FRenderingInfo ShadowInfo = ShadowRenderingInfo;
@@ -976,13 +976,27 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 {
 	// Shadow Pass
 	{
+		Renderer->ResetSpotShadows();
+		uint32 RenderedSpotShadowCount = 0;
+
 		FScene& Scene = ViewWorld.GetScene();
 
 		// Directional Light
 
 		// Local Lights
-		for (FLocalLightSceneProxy* LightProxy : Scene.LocalLightProxies)
+		//for (FLocalLightSceneProxy* LightProxy : Scene.LocalLightProxies)
+
+		const uint32 LocalLightCount = std::min<uint32>(
+			static_cast<uint32>(Scene.LocalLightProxies.Num()), MaxLocalLights
+		);
+		for (uint32 LocalLightIndex = 0; LocalLightIndex < LocalLightCount; ++LocalLightIndex)
 		{
+			FLocalLightSceneProxy* LightProxy = Scene.LocalLightProxies[LocalLightIndex];
+			if (!LightProxy)
+				continue;
+			// 라이트가 꺼져 있거나 그림자를 안 그리면 Pass를 건너뛴다.
+			// 그림자 없는 라이트는 UberLit에서 처리한다.
+
 			const ULightComponent* Light = LightProxy->GetLightComponent();
 			if (!Light || !Light->IsVisible() || !Light->IsCastingShadows())
 				continue;
@@ -998,6 +1012,9 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
 			case static_cast<uint32>(ELightType::Spot):
 			{
+				if (RenderedSpotShadowCount >= MAxSpotShadowCount)
+					continue;
+
 				const USpotLightComponent* SpotLight = Cast<USpotLightComponent>(Light);
 				assert(SpotLight);
 
@@ -1034,6 +1051,13 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 					Scene.GetShadowMapManager().GetShadowInfo(
 						SpotLight->GetUUID()
 					);
+
+				if (!ShadowInfo.ShadowMap.Texture ||
+					!ShadowInfo.ShadowMap.Texture->GetDSV() ||
+					!ShadowInfo.ShadowMap.Texture->GetSRV())
+				{
+					break;
+				}
 
 				// Reuse RenderingInfo struct for Shadow Pass
 				FRenderingInfo ShadowRenderingInfo{
@@ -1080,14 +1104,22 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 					ShadowQueue
 				);
 
+				Renderer->AddSpotShadow(
+					LocalLightIndex,
+					ShadowInfo.ShadowMap.Texture,
+					LightViewProjection,
+					SpotLight->GetShadowBias());
+				++RenderedSpotShadowCount;
+
 				break;
 			}
 			default:
 				break;
 			}
-		}
-	}
 
+		}
+		Renderer->UploadSpotShadows();
+	}
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
 
 	if (SettingsPanel->GetSettings().bDepthView)
@@ -1113,8 +1145,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	// 4. 오버레이 Pass
 	RenderOverlayPass(ViewIndex, ViewWorld, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue, IconQueue, ArrowQueue);
 
-}
 
+}
 
 // View Texture가 포함된 UI를 Swapchain 백버퍼에 합성한다. Present는 FEngineLoop가 한다.
 void UEditorEngine::PresentFrame()
