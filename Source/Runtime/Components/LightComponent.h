@@ -20,6 +20,12 @@ public:
 		return NULL;
 	}
 	FLightSceneProxy* SceneProxy = nullptr;
+
+	/* Getter */
+	float GetShadowAngle() const { return ShadowAngle; }
+	float GetShadowNearPlane() const { return ShadowNearPlane; }
+	float GetShadowFarPlane() const { return ShadowFarPlane; }
+
 protected:
 	virtual bool ShouldCreateRenderState() const override
 	{ return true; }
@@ -27,6 +33,12 @@ protected:
 	virtual void CreateRenderState() override;
 	virtual void DestroyRenderState() override;
 private:
+	float ShadowResoulutionScale = 1.0f;
+	float ShadowBias = 0.005f;
+	float ShadowSlopeBias = 0.01f;
+	float ShadowSharpen = 0.0f;
 
-
+	float ShadowAngle = 60.0f;
+	float ShadowNearPlane = 0.1f;
+	float ShadowFarPlane = 100.0f;
 };

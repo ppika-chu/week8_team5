@@ -8,6 +8,8 @@ class UStaticMeshComponent : public UMeshComponent
 
 	REFLECT_START(UStaticMeshComponent)
 		PROPERTY(StaticMesh)
+		PROPERTY(bCastShadow)
+		PROPERTY(bReceiveShadow)
 	REFLECT_END()
 public:
 	UStaticMeshComponent();
@@ -33,6 +35,11 @@ public:
 	bool IsEditorIcon() const { return bEditorIcon; }
 	void SetEditorIcon(bool IsEditorIcon) { bEditorIcon = IsEditorIcon; }
 
+	bool IsCastingShadow() const { return bCastShadow; }
+	bool IsReceivingShadow() const { return bReceiveShadow; }
+	void SetCastShadow(bool bInCastShadow) { bCastShadow = bInCastShadow; }
+	void SetReceiveShadow(bool bInReceiveShadow) { bReceiveShadow = bInReceiveShadow; }
+
 private:
 	UStaticMesh* StaticMesh = nullptr;
 	// Mesh의 Section별 Material과 Texture를 보존해 각각의 렌더 패킷으로 제출한다.
@@ -40,4 +47,7 @@ private:
 
 	// 조명 Icon Debug arrow용
 	bool bEditorIcon = false;
+
+	bool bCastShadow = true;
+	bool bReceiveShadow = true;
 };
