@@ -402,5 +402,19 @@ void FRenderDevice::CreateStates()
 		Desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
 
 		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::LinearWrap].GetAddressOf());
+
+		/* Shadow Comparison Sampler */
+		Desc = {
+			.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT,
+			.AddressU = D3D11_TEXTURE_ADDRESS_BORDER,
+			.AddressV = D3D11_TEXTURE_ADDRESS_BORDER,
+			.AddressW = D3D11_TEXTURE_ADDRESS_BORDER,
+			.MaxAnisotropy = 1,
+			.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL,
+			.BorderColor = { 1.0f, 1.0f, 1.0f, 1.0f },
+			.MinLOD = 0.0f,
+			.MaxLOD = D3D11_FLOAT32_MAX,
+		};
+		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::ShadowComparison].GetAddressOf());
 	}
 }
