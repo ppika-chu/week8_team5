@@ -287,13 +287,26 @@ void FRenderer::RenderDepth(const FMatrix& ViewProjection)
 {
 	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
 	bDepthOnly = true;
-	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
 	bDepthOnly = false;
 
 	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
 	LastMesh = nullptr;
 	LastMaterial = nullptr;
+}
+
+void FRenderer::RenderShadowDepth()
+{
+	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
+	bDepthOnly = true;
+	DrawStaticGroups();
+	DrawPackets(0, FirstTranslucentIndex, ShadowData.LightViewProj);
+	bDepthOnly = false;
+
+	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
+	LastMesh = nullptr;
+	LastMaterial = nullptr;
+
 }
 
 // 정렬된 패킷 중 [Begin, End) 범위를 View 행렬과 Section 범위로 그린다.

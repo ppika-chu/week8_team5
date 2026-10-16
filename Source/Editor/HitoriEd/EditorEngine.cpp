@@ -421,6 +421,7 @@ void UEditorEngine::RenderMultipleViewports()
 			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
 			// ViewWorld->GetScene().UpdateFireBallLight(Renderer);
 			ViewWorld->GetScene().UpdateLights(Renderer);
+			RenderShadowPass();
 			CapturedWorld = ViewWorld;
 		}
 
@@ -891,6 +892,32 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 	RenderCommand::BeginRenderPass(PassInfo);
 	DepthViewRenderer->OnRender(ViewRenderingInfo.DepthStencil.Texture, ViewProjection, ViewCameraLocation, ViewCameraForward);
 	RenderCommand::EndRenderPass(PassInfo);
+}
+
+void UEditorEngine::RenderShadowPass()
+{
+	if (!SettingsPanel->GetSettings().bDrawPrimitives || !Renderer->IsShadowEnabled()) return;
+
+	const FMatrix LightViewProj = Renderer->GetShadowViewProjection();
+	MultipleViewportsAdapter.BuildShadowQueue(LightViewProj, ShadowQueue);
+
+	// 카메라 안 넘겨도 됨. (Specular 계산용임)
+	Renderer->RenderQueueSorting(ShadowQueue, LightViewProj);
+
+	FTexture2D* ShadowMap = Renderer->GetShadowMap();
+	FRenderingInfo ShadowInfo;
+	ShadowInfo.ViewportSetting.Width = ShadowMap->GetWidth();
+	ShadowInfo.ViewportSetting.Height = ShadowMap->GetHeight();
+	ShadowInfo.DepthStencil.Texture = ShadowMap;
+	ShadowInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;		// 깊이 1.0으로 Clear
+
+	RenderCommand::BeginRenderPass(ShadowInfo);
+	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
+	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	Renderer->RenderShadowDepth();
+	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);		// 원복
+	RenderCommand::EndRenderPass(ShadowInfo);
+
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.

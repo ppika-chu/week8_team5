@@ -118,9 +118,10 @@ private:
 	void RenderNormalPass(const int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward);
 	//ToneMap Pass
 	void RenderToneMapPass(const int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo);
-
 	//Icon Pass
 	void RenderIconPass(int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderIconQueue, FRenderQueue& ArrowQueue);
+	//Shadow Pass
+	void RenderShadowPass();
 
 	FWorldContext& GetEditorWorldContext();
 	FWorldContext* GetPIEWorldContext(int32 WorldPIEInstance = 0);
@@ -163,6 +164,7 @@ private:
 	FRenderQueue RenderQueue;
 	FRenderQueue IconQueue;		// Light Icon Queue
 	FRenderQueue ArrowQueue;
+	FRenderQueue ShadowQueue;
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
 

@@ -768,6 +768,28 @@ void FMultipleViewportsAdapter::BuildRenderQueue(const int32 ViewIndex, FRenderQ
 		PendingStaticMeshes[I]->SubmitToRenderQueue(OutQueue, SelectedLODs[I]);
 }
 
+void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue)
+{
+	OutQueue.Reset();
+
+	const FFrustumPlanes LightFrustum = ExtractFrustumPlanes(LightViewProj);
+	
+	// 절두체 검사에 통과한 렌더 대상 ID 모으기
+	CullForView(RenderObjects, LightFrustum, ShadowVisibleIds);
+
+	for (const ObjectId Id : ShadowVisibleIds)
+	{
+		const auto Found = PrimitiveById.Find(Id);
+		if (!Found || !Found->Primitive)	continue;
+
+        auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
+		if (!StaticComponent || !StaticComponent->GetStaticMesh() || StaticComponent->IsEditorIcon()) continue;
+
+		StaticComponent->SubmitToRenderQueue(OutQueue, 0);		// LOD 0
+	}
+}
+
+
 // 클릭한 View의 Ray를 World에 전달하고 Component의 최근접 교차 결과를 보관한다.
 FPickHit FMultipleViewportsAdapter::PickActiveView(const FVector2 LocalMousePosition, UWorld& World)
 {
