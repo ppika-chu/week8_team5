@@ -230,31 +230,31 @@ bool UEditorEngine::Init()
 	const ImVec4 White = { 1, 1, 1, 1 };
 	const ImVec4 Green = { 0.40f, 0.80f, 0.30f, 1.0f };
 
-	Save = { "Save",   "Save Current Scene",UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Save.png"),  White, { EKeyCode::S, true } };
+	Save = { "Save",   "Save Current Scene",UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Save.png"),  White,{ EKeyCode::S, true } };
 
-	Play = { "Play",   "Play World",        UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  Green, { EKeyCode::P, false, true } };
+	Play = { "Play",   "Play World",        UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  Green,{ EKeyCode::P, false, true } };
 
 	Play.CanExecute = [this]()->bool {return !PlayWorld; };
 	Play.Execute = [this]() { RequestPlaySession(); };
 
-	Pause = { "Pause",  "Pause",			UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Pause.png"), White, { EKeyCode::Pause } };
+	Pause = { "Pause",  "Pause",			UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Pause.png"), White,{ EKeyCode::Pause } };
 
 	Pause.CanExecute = [this]()->bool {return !bIsPaused && PlayWorld; };
 	Pause.Execute = [this]() { bIsPaused = true; };
 
 
-	Resume = { "Resume", "Resume",          UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  White, { EKeyCode::Pause } };
+	Resume = { "Resume", "Resume",          UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  White,{ EKeyCode::Pause } };
 
 	Resume.CanExecute = [this]()->bool {return bIsPaused && PlayWorld; };
 	Resume.Execute = [this]() { bIsPaused = false; };
 
-	StepFrame = { "Step", "Step One Frame", UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Step.png"),  White, {} };
+	StepFrame = { "Step", "Step One Frame", UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Step.png"),  White,{} };
 
 	StepFrame.CanExecute = [this]()->bool {return bIsPaused && PlayWorld; };
-	StepFrame.Execute = [this]() { bStepRequested= true; };
+	StepFrame.Execute = [this]() { bStepRequested = true; };
 
 
-	Stop = { "Stop",   "Stop",				UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Stop.png"),  White, { EKeyCode::Escape } };
+	Stop = { "Stop",   "Stop",				UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Stop.png"),  White,{ EKeyCode::Escape } };
 
 	Stop.CanExecute = [this]()->bool {return PlayWorld; };
 	Stop.Execute = [this]() { RequestEndPlayMap(); };
@@ -376,7 +376,7 @@ void UEditorEngine::TickWorldAndEditor(const float DeltaTime)
 			GetActiveWorld()->Tick(1.0f / 60.0f);
 			bStepRequested = false;
 		}
-		else if(!bIsPaused)
+		else if (!bIsPaused)
 			GetActiveWorld()->Tick(DeltaTime);
 
 	}
@@ -550,6 +550,34 @@ FWorldContext* UEditorEngine::GetPIEWorldContext(int32 WorldPIEInstance)
 	}
 
 	return nullptr;
+}
+
+void UEditorEngine::RenderShadowPass(
+	const FRenderingInfo& ShadowRenderingInfo, 
+	const FMatrix& LightViewProjection, 
+	const FVector& LightPosition, 
+	FRenderQueue& ShadowQueue)
+{
+	FRenderingInfo ShadowInfo = ShadowRenderingInfo;
+
+	RenderCommand::BeginRenderPass(ShadowInfo);
+
+	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
+	RenderCommand::SetBlendState(EBlendState::Opaque);
+	RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+
+	Renderer->ResetStaticDrawGroups();
+
+	Renderer->RenderQueueSorting(
+		ShadowQueue,
+		LightViewProjection,
+		LightPosition
+	);
+	Renderer->RenderDepth(LightViewProjection);
+
+	RenderCommand::EndRenderPass(ShadowInfo);
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.
@@ -727,7 +755,7 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 		// 아이콘 먼저 그리기 (반투명)
 		Renderer->RenderQueueSorting(IconQueue, ViewProjection, ViewCameraLocation);
 		Renderer->RenderTranslucent(ViewProjection);
-		
+
 		// 화살표 그리기 (불투명)
 		Renderer->RenderQueueSorting(ArrowQueue, ViewProjection, ViewCameraLocation);
 		Renderer->RenderOpaque(ViewProjection);
@@ -758,9 +786,9 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 
 	// 선택 대상은 한 월드에만 속하므로 그 월드를 그리는 View에만 표시한다.
 	const auto IsInViewWorld = [&ViewWorld](const UActorComponent* Component)
-	{
-		return Component && Component->GetOwner() && Component->GetOwner()->GetWorld() == &ViewWorld;
-	};
+		{
+			return Component && Component->GetOwner() && Component->GetOwner()->GetWorld() == &ViewWorld;
+		};
 
 	// 스텐실 기반이라 선택 대상의 가시성이 꺼져 있어도 외곽선만 그린다.
 	if (bShowEditorOverlay && IsInViewWorld(Outline->GetTarget()))
@@ -946,6 +974,119 @@ void UEditorEngine::UpdateGizmoAndPicking()
 // View 행렬로 Scene·Grid·Gizmo·텍스트·Outline을 렌더한다.
 void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderQueue, FRenderQueue& IconQueue, FRenderQueue& ArrowQueue)
 {
+	// Shadow Pass
+	{
+		FScene& Scene = ViewWorld.GetScene();
+
+		// Directional Light
+
+		// Local Lights
+		for (FLocalLightSceneProxy* LightProxy : Scene.LocalLightProxies)
+		{
+			const ULightComponent* Light = LightProxy->GetLightComponent();
+			if (!Light || !Light->IsVisible() || !Light->IsCastingShadows())
+				continue;
+
+			FLightRenderParameters LightParams;
+			LightProxy->GetLightShaderParameters(LightParams);
+
+			switch (LightParams.Type)
+			{
+			case static_cast<uint32>(ELightType::Point):
+				// TODO
+				break;
+
+			case static_cast<uint32>(ELightType::Spot):
+			{
+				const USpotLightComponent* SpotLight = Cast<USpotLightComponent>(Light);
+				assert(SpotLight);
+
+
+				/* Prepare Light Matrix */
+				const FVector LightPosition = SpotLight->GetWorldLocation();
+
+				FCameraTransform LightTransform{
+					.Location = LightPosition,
+					.Rotation = SpotLight->GetWorldRotation().Quaternion()
+				};
+
+				const float Angle = SpotLight->GetShadowAngle();
+				const float NearZ = SpotLight->GetShadowNearPlane();
+				const float FarZ = SpotLight->GetShadowFarPlane();
+
+				assert(Angle > 0.0f && Angle < 180.0f);
+				assert(NearZ > 0.0f && FarZ > NearZ);
+
+				FCameraProjection Projection{
+					.Mode = EProjectionMode::Perspective,
+					.FovDegrees = Angle,
+					.NearClip = NearZ,
+					.FarClip = FarZ
+				};
+
+				const FMatrix LightView = BuildViewMatrix(LightTransform);
+				const FMatrix LightProjection = BuildProjectionMatrix(Projection, 1.0f);
+
+				const FMatrix LightViewProjection = LightView * LightProjection;
+
+				/* Prepare Shadow Target */
+				FShadowInfo ShadowInfo =
+					Scene.GetShadowMapManager().GetShadowInfo(
+						SpotLight->GetUUID()
+					);
+
+				// Reuse RenderingInfo struct for Shadow Pass
+				FRenderingInfo ShadowRenderingInfo{
+					.ViewportSetting = {
+						.Width = ShadowInfo.resolution,
+						.Height = ShadowInfo.resolution
+					},
+					.DepthStencil = ShadowInfo.ShadowMap
+				};
+
+				/* Prepare Mesh Queue */
+				FRenderQueue ShadowQueue;
+				const FFrustumPlanes LightFrustum =
+					ExtractFrustumPlanes(LightViewProjection);
+
+				for (FPrimitiveSceneProxy* PrimitiveProxy : Scene.PrimitiveSceneProxies)
+				{
+					auto* Mesh = Cast<UStaticMeshComponent>(
+						PrimitiveProxy->GetComponent()
+					);
+
+					if (!Mesh || !Mesh->IsVisible() ||
+						Mesh->IsEditorIcon() || !Mesh->GetStaticMesh() ||
+						!Mesh->IsCastingShadow())
+					{
+						continue;
+					}
+
+					// Frustum culling
+					if (!IsAABBInFrustum(
+						PrimitiveProxy->GetBounds(), LightFrustum))
+					{
+						continue;
+					}
+
+					Mesh->SubmitToRenderQueue(ShadowQueue, 0);
+				}
+
+				/* Render Shadow Pass */
+				RenderShadowPass(
+					ShadowRenderingInfo,
+					LightViewProjection,
+					LightPosition,
+					ShadowQueue
+				);
+
+				break;
+			}
+			default:
+				break;
+			}
+		}
+	}
 
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
 

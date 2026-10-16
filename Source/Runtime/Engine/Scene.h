@@ -12,6 +12,7 @@
 #include "Math/BVH.h"
 #include "Render/FogInfo.h"
 #include "Render/Renderer.h"
+#include "Render/ShadowMapManager.h"
  
 struct FExponentialHeightFogSceneInfo
 {
@@ -50,6 +51,8 @@ public:
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
 
+	inline FShadowMapManager& GetShadowMapManager() { return ShadowMapManager; }
+
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
 	TArray<FPrimitiveSceneProxy*> RenderStateDirtyProxies;
@@ -72,4 +75,7 @@ public:
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
 	TArray<FDirectionalLightSceneProxy*>  DirectionalLightProxies;
 	TArray<USkyLightComponent*>           SkyLights;               // 프록시 없음
+
+private:
+	FShadowMapManager ShadowMapManager;
 };

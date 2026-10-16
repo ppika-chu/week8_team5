@@ -13,6 +13,16 @@ T* Cast(UObject* Object)
 	return static_cast<T*>(Object);
 }
 
+template<typename T>
+const T* Cast(const UObject* Object)
+{
+	if (!Object || !Object->IsA<T>())
+	{
+		return nullptr;
+	}
+	return static_cast<const T*>(Object);
+}
+
 template <typename T>
 T* CastChecked(UObject* Object)
 {

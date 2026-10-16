@@ -136,6 +136,9 @@ void FScene::RemoveLight(ULightComponent* Component)
 
 	Component->SceneProxy = nullptr;
 	delete Proxy;
+
+	// Erase shadow map
+	ShadowMapManager.ReleaseShadowMap(Component->GetUUID());
 }
 
 void FScene::RemoveAllLights()

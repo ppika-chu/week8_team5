@@ -104,6 +104,8 @@ private:
 	// 화면 합성과 View 설정 보관으로 프레임을 마무리한다.
 	void EndFrame();
 
+	void RenderShadowPass(const FRenderingInfo& ShadowRenderingInfo, const FMatrix& LightViewProjection, const FVector& LightPosition, FRenderQueue& ShadowQueue);
+
 	//불투명 물체에 대한 Pass
 	void RenderOpaquePass(const int32 ViewIndex, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderQueue);
 	//안개에 대한 Pass
