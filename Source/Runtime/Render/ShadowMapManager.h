@@ -2,6 +2,7 @@
 #include <wrl/client.h>
 #include "Core/Types.h"
 #include "Texture2D.h"
+#include "RenderingInfo.h"
 
 //struct FShadowMapResource
 //{
@@ -16,6 +17,7 @@ class FShadowMapManager
 {
 public:
 	FTexture2D* GetOrCreateShadowMap(uint32 LightID);
+	FShadowInfo GetShadowInfo(uint32 LightID);
 	void ReleaseShadowMap(uint32 LightID);
 
 

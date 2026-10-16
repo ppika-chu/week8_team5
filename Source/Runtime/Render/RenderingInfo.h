@@ -49,3 +49,9 @@ struct FRenderingInfo
 	TArray<FRenderingDesc> ColorRenderTargets;
 	FRenderingDesc DepthStencil;
 };
+
+struct FShadowInfo
+{
+	FRenderingDesc ShadowMap;
+	uint32 resolution = 1024;
+};
