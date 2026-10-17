@@ -202,22 +202,37 @@ float3 GetAmbientLighting()
     return Ambient.Color * Ambient.Intensity;
 }
 
+// WorldPos -> Shadow Map UV, Light depth
+bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out float OutDepth)
+{
+    const float4 LightClip = mul(float4(WorldPos, 1.0f), LightVP);
+    const float3 Ndc = LightClip.xyz / LightClip.w;
+    
+    OutUV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
+    OutDepth = Ndc.z;
+
+    return all(OutUV >= 0.0f) && all(OutUV <= 1.0f) && (OutDepth <= 1.0f) && (OutDepth >= 0.0f);      // Shadow Map 밖이면 빛을 받는 것으로 간주
+}
+
+uint2 ShadowUVtoTexel(float UV, uint2 Size)
+{
+    return min(uint2(UV * float2(Size)), Size -1);
+}
+
 // return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
 float CalcDirectionalShadow(float3 WorldPos)
 {
     if (!bShadowEnabled) return 1.0f;
 
-    const float4 LightClip = mul(float4(WorldPos, 1.0f), LightViewProj);
-    const float3 Ndc = LightClip.xyz / LightClip.w;
-    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
+    float UV;
+    float Depth;
 
-    // any() : 벡터 성분 중 하나라도 참이면 true
-    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f) return 1.0f;      // Shadow Map 밖이면 빛을 받는 것으로 간주
+    if(!ProjectToShadowMap(WorldPos, LightViewProj, UV, Depth)) return 1.0f;
 
     uint Width, Height;
 
     ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 함수
-    const uint2 Texel = min(uint2(UV * float2(Width, Height)), uint2(Width-1, Height-1));    // UV = 1.0 이면 텍셀 밖이므로 clamp
+    const uint2 Texel = ShadowUVtoTexel(UV, uint2(Width, Height));    // UV = 1.0 이면 텍셀 밖이므로 clamp
     const float MapDepth = ShadowMap.Load(int3(Texel, 0));
     return (Ndc.z - ShadowBias > MapDepth)? 0.0f : 1.0f;
 }

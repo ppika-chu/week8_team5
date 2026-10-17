@@ -125,6 +125,16 @@ FMatrix FMatrix::MakeOrthographic(float Width, float Height, float NearZ, float 
     );
 }
 
+FMatrix FMatrix::MakeView(const FVector& Eye, const FVector& Forward, const FVector& Right, const FVector& Up)
+{
+	return FMatrix(
+		Forward.X,		   Right.X,		   Up.X,		  0.0f,
+		Forward.Y,		   Right.Y,		   Up.Y,		  0.0f,
+		Forward.Z,		   Right.Z,		   Up.Z,		  0.0f,
+		-Forward.Dot(Eye), -Right.Dot(Eye), -Up.Dot(Eye), 1.0f
+	);
+}
+
 FVector4 FMatrix::TransformFVector4(const FVector4& V) const
 {
 	FMatrixRegister MReg = FMatrixRegister::Load(*this);

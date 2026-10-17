@@ -53,6 +53,8 @@ public:
 
 	static FMatrix MakeTranslation(const FVector& T);
 	static FMatrix MakeOrthographic(float Width, float Height, float NearZ, float FarZ);
+	// View 공간 행렬 (x=Forward, y=Right, z=Up)
+	static FMatrix MakeView(const FVector& Eye, const FVector& Forward, const FVector& Right, const FVector& Up);
 
 	//void To3x4MatrixTranspose(float* Out) const;
 	// FMatrix TransposeAdjoint();
