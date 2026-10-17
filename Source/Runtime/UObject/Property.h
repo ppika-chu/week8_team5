@@ -43,11 +43,12 @@ DEFINE_PROPERTY_TYPE(FColor, Color)
 DEFINE_PROPERTY_TYPE(FLinearColor, LinearColor)
 
 //DragFloat, DragInt, DragFloat3, DragFloat4, ColorEdit4 등 ImGui 위젯과 관련된 메타데이터를 저장하는 구조체
-struct FProPertyWidgetMeta
+struct FPropertyMeta
 {
-	float MinValue;
-	float MaxValue;
-    float delta;
+    float DragSpeed = 0.1f;
+	float Min = 0.0f;
+	float Max = 0.0f;
+    const char* Format = "%.3f";
 };
 
 // 프로퍼티 지정자 (UE의 UPROPERTY 지정자에 대응)
@@ -71,6 +72,7 @@ struct FProperty
     size_t Size;
     UClass* Class = nullptr;
     uint32 Flags = CPF_Default;
+    FPropertyMeta Meta{};
 
     bool HasAnyFlags(uint32 InFlags) const { return (Flags & InFlags) != 0; }
 };

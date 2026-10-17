@@ -34,6 +34,13 @@ public: \
 #define PROPERTY_TYPE_FLAGS(PropertyName, PropertyType, Flags) \
     InClass->AddProperty<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), EPropertyType::##PropertyType, Flags);
 
+// 위젯 메타 지정. 예: PROPERTY_META(ShadowBias, .DragSpeed = 0.0001f, .Format = "%.4f")
+#define PROPERTY_META(PropertyName, ...) \
+    InClass->AddPropertyMeta<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), FPropertyMeta{ __VA_ARGS__ });
+
+#define PROPERTY_META_FLAGS(PropertyName, Flags, ...) \
+    InClass->AddPropertyWithMeta<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), FPropertyMeta{ __VA_ARGS__ }, Flags);
+
 #define REFLECT_END()\
 	};\
 private:

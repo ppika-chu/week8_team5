@@ -189,7 +189,7 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		if (Size > 0.0f)		
 		{
 			Shadow.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size);
-			Shadow.ShadowBias = 0.0f;	// 우선은 Rasterizer 값으로 튜닝하고 필요시 사용.  Normal Offset으로 변경하는 것 고려.
+			Proxy->GetLightComponent()->GetShadowBias();
 			Shadow.bShadowEnabled = 1;
 		}
 		break;                                            // 셰이더는 하나만 받음

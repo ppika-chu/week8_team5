@@ -620,8 +620,12 @@ namespace
 		switch (Property.Type)
 		{
 		case EPropertyType::Float:
-			bChanged = ImGui::DragFloat(Label.c_str(), static_cast<float*>(ValuePtr), 0.1f);
+		{
+			const FPropertyMeta& Meta = Property.Meta;
+			const ImGuiSliderFlags Flags = (Meta.Min < Meta.Max) ? ImGuiSliderFlags_AlwaysClamp : ImGuiSliderFlags_None;
+			bChanged = ImGui::DragFloat(Label.c_str(), static_cast<float*>(ValuePtr), Meta.DragSpeed, Meta.Min, Meta.Max, Meta.Format, Flags);
 			break;
+		}
 		case EPropertyType::Int:
 			bChanged = ImGui::DragInt(Label.c_str(), static_cast<int*>(ValuePtr), 1.0f);
 			break;
