@@ -24,6 +24,9 @@
 #define LIGHTING_MODEL_LAMBERT 1
 #endif
 
+// ShadowRenderer.h의 MaxCascades와 같아야 한다.
+#define MAX_CASCADES 4
+
 // 아래 구조체와 cbuffer Lighting은 Renderer.h의 FLightingConstants와 바이트 단위로 같아야 한다.
 struct FAmbientLightInfo
 {
@@ -60,7 +63,14 @@ struct FLightRenderParameters
     float Padding;
 };
 
-
+struct FCascadeData
+{
+    matrix LightViewProj;
+    float Size;
+    float Depth;
+    float Bias;
+    float Padding;
+};
 
 // Renderer.h의 FViewConstants와 바이트 단위로 같아야 한다. VS와 PS 둘 다 b0에 바인딩된다.
 cbuffer ViewConstants : register(b0)
@@ -113,10 +123,11 @@ cbuffer LightGrid : register(b5)
 
 cbuffer ShadowConstants : register(b6)
 {
-    matrix LightViewProj;
-    float ShadowBias;
-    uint bShadowEnabled;
-    float2 ShadowPadding;
+    FCascadeData Cascades[MAX_CASCADES];
+    uint  NumCascades;
+    float LightSourceAngle;
+    float CascadeBlendWidth;
+    float ShadowPadding;
 };
 
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
@@ -222,19 +233,19 @@ uint2 ShadowUVtoTexel(float2 UV, uint2 Size)
 // return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
 float CalcDirectionalShadow(float3 WorldPos)
 {
-    if (!bShadowEnabled) return 1.0f;
+    if (NumCascades == 0) return 1.0f;
 
     float2 UV;
     float Depth;
 
-    if(!ProjectToShadowMap(WorldPos, LightViewProj, UV, Depth)) return 1.0f;
+    if(!ProjectToShadowMap(WorldPos, Cascades[0].LightViewProj, UV, Depth)) return 1.0f;
 
     uint Width, Height;
 
     ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 함수
     const uint2 Texel = ShadowUVtoTexel(UV, uint2(Width, Height));    // UV = 1.0 이면 텍셀 밖이므로 clamp
     const float MapDepth = ShadowMap.Load(int3(Texel, 0));
-    return (Depth - ShadowBias > MapDepth)? 0.0f : 1.0f;
+    return (Depth - Cascades[0].Bias > MapDepth)? 0.0f : 1.0f;
 }
 
 // Directional Light의 영향을 구한다

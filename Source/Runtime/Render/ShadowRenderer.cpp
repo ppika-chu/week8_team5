@@ -113,7 +113,7 @@ void FShadowRenderer::BeginShadowPasses()
 	EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 }
 
-FMatrix FShadowRenderer::FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, const FBox& SceneBounds) const
+FCascadeData FShadowRenderer::FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, const FBox& SceneBounds) const
 {
 	// cascade를 감싸는 구 만들기
 	FVector Center(0.0f, 0.0f, 0.0f);
@@ -147,9 +147,14 @@ FMatrix FShadowRenderer::FitCascade(const FVector Corners[8], const FVector& F, 
 
 	const FVector Eye = Center + F * TNear;
 	const float Depth = TFar - TNear;
+	
+	FCascadeData Cascade{};
 
 	// Light View * Light Projection
-	return FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth);
+	Cascade.LightViewProj = FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth);
+	Cascade.Size = Size;
+	Cascade.Depth = Depth;
+	return Cascade;
 
 }
 
@@ -192,9 +197,15 @@ void FShadowRenderer::UpdateCascades(const FScene& Scene, const FMatrix& CameraV
 		GetFrustumPlaneCorners(CameraViewProj, Near, Far);
 		GetSliceCorners(Near, Far, CamNear, CamFar, CamNear, SliceFar, Corners);
 
-		Constants.LightViewProj = FitCascade(Corners, F, R, U, Bounds);		// Light Frustum의 VP 반환
-		Constants.ShadowBias = Light->GetLightComponent()->GetShadowBias();
-		Constants.bShadowEnabled = 1;		// 그림자 활성화
+		// Todo : CSM 늘어나면 for문 돌릴 예정. 일단은 하나라서 [0]
+		FCascadeData& Cascade = Constants.Cascades[0];
+		Cascade = FitCascade(Corners, F, R, U, Bounds);
+		Cascade.Bias = Light->GetLightComponent()->GetShadowBias();
+
+		// Todo : 컴포넌트 프로퍼티 추가 후 연결해야 함.
+		Constants.NumCascades = 1;
+		Constants.LightSourceAngle = 0.0f;
+		Constants.CascadeBlendWidth = 0.0f;
 
 	}
 	
