@@ -214,7 +214,7 @@ bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out f
     return all(OutUV >= 0.0f) && all(OutUV <= 1.0f) && (OutDepth <= 1.0f) && (OutDepth >= 0.0f);      // Shadow Map 밖이면 빛을 받는 것으로 간주
 }
 
-uint2 ShadowUVtoTexel(float UV, uint2 Size)
+uint2 ShadowUVtoTexel(float2 UV, uint2 Size)
 {
     return min(uint2(UV * float2(Size)), Size -1);
 }
@@ -224,7 +224,7 @@ float CalcDirectionalShadow(float3 WorldPos)
 {
     if (!bShadowEnabled) return 1.0f;
 
-    float UV;
+    float2 UV;
     float Depth;
 
     if(!ProjectToShadowMap(WorldPos, LightViewProj, UV, Depth)) return 1.0f;
@@ -234,7 +234,7 @@ float CalcDirectionalShadow(float3 WorldPos)
     ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 함수
     const uint2 Texel = ShadowUVtoTexel(UV, uint2(Width, Height));    // UV = 1.0 이면 텍셀 밖이므로 clamp
     const float MapDepth = ShadowMap.Load(int3(Texel, 0));
-    return (Ndc.z - ShadowBias > MapDepth)? 0.0f : 1.0f;
+    return (Depth - ShadowBias > MapDepth)? 0.0f : 1.0f;
 }
 
 // Directional Light의 영향을 구한다

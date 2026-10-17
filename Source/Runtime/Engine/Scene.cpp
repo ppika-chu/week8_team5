@@ -150,16 +150,9 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
+void FScene::UpdateLights(FRenderer* Renderer)
 {
-	if (!Renderer || !ShadowRenderer) return;
-
-	// Shadow 계산하기 위한 인자값들
-	FBox Bounds = BVH.GetRootBounds();
-	FVector Center = (Bounds.Max + Bounds.Min) * 0.5f;
-	float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
-	float Depth = 2 * Radius;	// 빛 방향 (Forward)
-	float Size = 2 * Radius;	// 빛에 수직인 방향 (Right, Up)
+	if (!Renderer) return;
 	
 	FLightingConstants Constants{};
 	Constants.Ambient.Color = FVector(1, 1, 1);
@@ -174,29 +167,15 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		break;
 	}
 	
-	FShadowConstants Shadow{};		// bShadowEnabled = 0
-	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())
 	{
-		if (!Proxy->IsVisible()) continue;
-		
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
 		Constants.Directional.Direction = P.Direction;
 		Constants.Directional.Color = P.Color;
 		Constants.Directional.Intensity = P.Intensity;
 
-		// 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
-		if (Size > 0.0f)		
-		{
-			Shadow.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size);
-			Shadow.ShadowBias = Proxy->GetLightComponent()->GetShadowBias();
-			Shadow.bShadowEnabled = 1;
-		}
-		break;                                            // 셰이더는 하나만 받음
-
 	}
-	// Light 없으면 bShadowEnabled = 0
-	ShadowRenderer->SetParameters(Shadow);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{
@@ -259,6 +238,16 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
 }
+
+const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const
+{
+	for (const FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	{
+		if (Proxy->IsVisible())	return Proxy;
+	}
+	return nullptr;
+}
+
 
 void FScene::AddFogInfo(uint32 Id, const FFogInfo& FogInfo)
 {

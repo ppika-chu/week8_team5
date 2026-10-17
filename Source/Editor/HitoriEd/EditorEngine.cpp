@@ -43,6 +43,9 @@ namespace
 
 #include "Core/SplashScreen.h"
 
+// Todo : SettingsPannel 옮겨서 Editor에서 숨길 수 있도록
+constexpr float ShadowDistance = 50.0f;
+
 FEngineConfig UEditorEngine::GetConfig() const
 {
 	FEngineConfig Desc;
@@ -423,10 +426,17 @@ void UEditorEngine::RenderMultipleViewports()
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
 			// ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
-			RenderShadowPass();
+			ViewWorld->GetScene().UpdateLights(Renderer);
 			CapturedWorld = ViewWorld;
 		}
+
+		ShadowRenderer->UpdateCascades(
+			ViewWorld->GetScene(),
+			MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
+			MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
+			ShadowDistance);
+		
+		RenderShadowPass();
 
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
@@ -455,7 +465,7 @@ void UEditorEngine::RenderMultipleViewports()
 			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
+			ViewWorld->GetScene().UpdateLights(Renderer);
 			CapturedWorld = ViewWorld;
 		}
 

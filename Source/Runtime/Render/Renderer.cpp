@@ -59,15 +59,7 @@ namespace
 			| (static_cast<uint64>(Group.LODIndex & 0x3) << 29);
 	}
 
-	void ExtractDepthRange(const FMatrix& P, float& OutNear, float& OutFar, bool& bOutOrtho)
-	{
-		const float ZScale = P.M[0][2];
-		const float ZOffset = P.M[3][2];
-		bOutOrtho = P.M[0][3] < 0.5f;                 // 원근: w = X (M[0][3] = 1), 직교: w = 1
-		OutNear = -ZOffset / ZScale;
-		OutFar = bOutOrtho ? OutNear + 1.0f / ZScale
-			: ZOffset / (1.0f - ZScale);
-	}
+	// ExtractDepthRange inline으로 옮김
 }
 
 bool FRenderer::Init()
