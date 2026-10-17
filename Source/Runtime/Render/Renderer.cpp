@@ -621,37 +621,40 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 }
 
-void FRenderer::SetShadowConstants(const FShadowConstants& Constants)
-{
-	FShadowConstants UploadConstants = Constants;
-	UploadConstants.NumSpotShadowDatas = NumSpotShadowDatasThisView;
-
-	RenderCommand::UpdateBufferData(ShadowCB.get(), &UploadConstants);
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel);
-}
-
-void FRenderer::SetSpotShadowDatas(const TArray<FSpotShadowData>& ShadowDatas)
+void FRenderer::UpdateSpotShadowBuffers(const TArray<FSpotShadowData>& ShadowDatas)
 {
 	NumSpotShadowDatasThisView = 0;
 
-	constexpr uint32 bindResourceIndex = 14;
-
-	RenderCommand::UnbindShaderResource(bindResourceIndex, EShaderBindFlagBits::Pixel);
-	if (!SpotShadowDataBuffer
-		|| !SpotShadowDataBuffer->GetBuffer()
-		|| !SpotShadowDataBuffer->GetSRV())
+	// Bind shadow datas
 	{
-		return;
+		constexpr uint32 BindResourceIndex = 14;
+
+		RenderCommand::UnbindShaderResource(BindResourceIndex, EShaderBindFlagBits::Pixel);
+		if (!SpotShadowDataBuffer
+			|| !SpotShadowDataBuffer->GetBuffer()
+			|| !SpotShadowDataBuffer->GetSRV())
+		{
+			return;
+		}
+
+		NumSpotShadowDatasThisView = std::min<uint32>(ShadowDatas.Num(), SpotShadowDataBuffer->GetMaxCount());
+		if (NumSpotShadowDatasThisView == 0)
+		{
+			return;
+		}
+
+		RenderCommand::UpdateBufferData(SpotShadowDataBuffer.get(), ShadowDatas.GetData(), NumSpotShadowDatasThisView * sizeof(FSpotShadowData));
+		RenderCommand::BindShaderResource(BindResourceIndex, SpotShadowDataBuffer.get(), EShaderBindFlagBits::Pixel);
 	}
 
-	NumSpotShadowDatasThisView = std::min<uint32>(ShadowDatas.Num(), SpotShadowDataBuffer->GetMaxCount()); 
-	if (NumSpotShadowDatasThisView == 0)
+	// Bind shadow constant
 	{
-		return;
-	}
+		FShadowConstants ShadowConstants{};
+		ShadowConstants.NumSpotShadowDatas = NumSpotShadowDatasThisView;
 
-	RenderCommand::UpdateBufferData(SpotShadowDataBuffer.get(), ShadowDatas.GetData(), NumSpotShadowDatasThisView * sizeof(FSpotShadowData));
-	RenderCommand::BindShaderResource(bindResourceIndex, SpotShadowDataBuffer.get(), EShaderBindFlagBits::Pixel);
+		RenderCommand::UpdateBufferData(ShadowCB.get(), &ShadowConstants);
+		RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel);
+	}
 }
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)

@@ -251,7 +251,7 @@ void RenderCommand::BeginRenderPass(const FRenderingInfo& RenderingInfo)
 		*/
 
 		FTexture2D* DepthTexture = RenderingInfo.DepthStencil.Texture;
-		DSV = (RenderingInfo.DepthStencilSlice < 0) ? DepthTexture->GetDSV() : DepthTexture->GetSliceDSV(static_cast<uint32>(RenderingInfo.DepthStencilSlice));
+		DSV = (RenderingInfo.DepthStencilSliceIndex < 0) ? DepthTexture->GetDSV() : DepthTexture->GetSliceDSV(static_cast<uint32>(RenderingInfo.DepthStencilSliceIndex));
 
 		if (RenderingInfo.DepthStencil.LoadOp == ERenderTargetLoadOp::Clear)
 		{

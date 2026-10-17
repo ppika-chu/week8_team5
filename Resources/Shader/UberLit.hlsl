@@ -120,7 +120,7 @@ cbuffer ShadowConstants : register(b6)
 struct FSpotShadowData
 {
     float4x4 ShadowLightViewProjection;
-    int ShadowMapSlice;
+    int ShadowMapSliceIndex;
     float ShadowBias;
     float2 Padding;
 };
@@ -195,7 +195,7 @@ float GetSpotShadowVisibility(uint LightIndex, float3 WorldPos)
     }
 
     const FSpotShadowData ShadowData = SpotShadowDatas[LightIndex];
-    if (ShadowData.ShadowMapSlice < 0)
+    if (ShadowData.ShadowMapSliceIndex < 0)
     {
         return 1.0f;
     }
@@ -211,11 +211,11 @@ float GetSpotShadowVisibility(uint LightIndex, float3 WorldPos)
     uint Width, Height, SliceCount;
     SpotShadowMaps.GetDimensions(Width, Height, SliceCount);
 
-    if ((uint) ShadowData.ShadowMapSlice >= SliceCount)
+    if ((uint) ShadowData.ShadowMapSliceIndex >= SliceCount)
         return 1.0f;
 
     const uint2 ShadowTexel = min((uint2) (ShadowUV * float2(Width, Height)), uint2(Width - 1, Height - 1));
-    const float StoredDepth = SpotShadowMaps.Load(int4(ShadowTexel, ShadowData.ShadowMapSlice, 0));
+    const float StoredDepth = SpotShadowMaps.Load(int4(ShadowTexel, ShadowData.ShadowMapSliceIndex, 0));
 
     return (ShadowDepth <= StoredDepth + ShadowData.ShadowBias) ? 1.0f : 0.0f;
 }

@@ -955,38 +955,44 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 		ViewMode == EViewMode::Lit_BlinnPhong;
 
 	// 이전 뷰의 그림자 데이터와 텍스처 바인딩을 해제한다.
-	TArray<FSpotShadowData> EmptyShadowDatas;
-	Renderer->SetSpotShadowDatas(EmptyShadowDatas);
-	RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Pixel);
-
-	if (ShadowRenderer && bRenderShadows && SettingsPanel->GetSettings().bDrawPrimitives)
+	// Todo: Use reset
+	constexpr uint32 BindResourceIndex = 13;
 	{
-		ShadowRenderer->Render(ViewWorld.GetScene());
+		TArray<FSpotShadowData> EmptyShadowDatas;
+		Renderer->UpdateSpotShadowBuffers(EmptyShadowDatas);
 
-		FTexture2D* ShadowMap = ShadowRenderer->GetShadowMap();
-		const auto& ShadowDatas = ShadowRenderer->GetSpotShadowDatas();
+		RenderCommand::UnbindShaderResource(BindResourceIndex, EShaderBindFlagBits::Pixel);
+	}
+	
+	assert(ShadowRenderer != nullptr);
 
-		if (ShadowMap && ShadowMap->GetSRV())
+	// Todo: Change logic, use bool if scene contains light(shadow)
+	if (bRenderShadows && SettingsPanel->GetSettings().bDrawPrimitives)
+	{
+		ShadowRenderer->RenderPass(ViewWorld.GetScene());
+
+		FTexture2D* ShadowMapArray = ShadowRenderer->GetShadowMapArray();
+		const TArray<FSpotShadowData>& ShadowDatas = ShadowRenderer->GetSpotShadowDatas();
+
+		assert(ShadowMapArray != nullptr);
+		assert(ShadowMapArray->GetSRV() != nullptr);
+
+		for (const FSpotShadowData& ShadowData : ShadowDatas)
 		{
-			for (const FSpotShadowData& ShadowData : ShadowDatas)
+			if (ShadowData.ShadowMapSliceIndex < 0)
 			{
-				if (ShadowData.ShadowMapSlice < 0)
-				{
-					continue;
-				}
-
-				RenderCommand::BindShaderResource(13, ShadowMap, EShaderBindFlagBits::Pixel);
-				Renderer->SetSpotShadowDatas(ShadowDatas);
-
-				break;
+				continue;
 			}
+
+			RenderCommand::BindShaderResource(BindResourceIndex, ShadowMapArray, EShaderBindFlagBits::Pixel);
+			Renderer->UpdateSpotShadowBuffers(ShadowDatas);
+
+			// Todo: Do not use break
+			break;
 		}
 	}
 
-	Renderer->SetShadowConstants(FShadowConstants{});
-
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
-
 	if (SettingsPanel->GetSettings().bDepthView)
 	{
 		RenderDepthPass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward);

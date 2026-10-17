@@ -232,8 +232,7 @@ public:
 
 	//void SetFireBallLight(const FFireBallLightConstants& LightConstants);
 	void SetLighting(FLightingConstants& LightingConstants, const TArray<FLightRenderParameters>& InLocalLights);
-	void SetShadowConstants(const FShadowConstants& Constants);
-	void SetSpotShadowDatas(const TArray<FSpotShadowData>& ShadowDatas);
+	void UpdateSpotShadowBuffers(const TArray<FSpotShadowData>& ShadowDatas);
 
 	// 이후 그리는 UberLit 머티리얼이 쓸 조명 모델. View마다 RenderOpaque 전에 설정한다.
 	void SetViewMode(EViewMode InViewMode);

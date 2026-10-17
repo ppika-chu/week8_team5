@@ -49,5 +49,5 @@ struct FRenderingInfo
 	TArray<FRenderingDesc> ColorRenderTargets;
 	FRenderingDesc DepthStencil;
 
-	int32 DepthStencilSlice = -1;
+	int32 DepthStencilSliceIndex = -1;
 };
