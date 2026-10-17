@@ -900,14 +900,14 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 
 void UEditorEngine::RenderShadowPass()
 {
-	if (!SettingsPanel->GetSettings().bDrawPrimitives || 
-		!ShadowRenderer->IsShadowEnabled()) return;
+	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
 
-	const FMatrix& LightViewProj = ShadowRenderer->GetShadowViewProjection();
-	MultipleViewportsAdapter.BuildShadowQueue(LightViewProj, ShadowQueue);
-
-	ShadowRenderer->OnRender(ShadowQueue);
-
+	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
+	for (const FShadowInfo& ShadowInfo : ShadowInfos)
+	{
+		MultipleViewportsAdapter.BuildShadowQueue(ShadowInfo.LightViewProj, ShadowQueue);
+		ShadowRenderer->OnRender(ShadowQueue);
+	}
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.

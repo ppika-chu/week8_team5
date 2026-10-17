@@ -174,7 +174,8 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		break;
 	}
 	
-	FShadowConstants Shadow{};		// bShadowEnabled = 0
+	//FShadowConstants Shadow{};		// bShadowEnabled = 0
+	TArray<FShadowData> ShadowDataArray;
 	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
 	{
 		if (!Proxy->IsVisible()) continue;
@@ -188,15 +189,16 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		// 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
 		if (Size > 0.0f)		
 		{
-			Shadow.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size);
-			Shadow.ShadowBias = Proxy->GetLightComponent()->GetShadowBias();
-			Shadow.bShadowEnabled = 1;
+			FShadowData ShadowData{
+				.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size),
+				.DepthBias = Proxy->GetLightComponent()->GetShadowBias()
+			};
+			ShadowDataArray.Add(ShadowData);
 		}
 		break;                                            // 셰이더는 하나만 받음
-
 	}
 	// Light 없으면 bShadowEnabled = 0
-	ShadowRenderer->SetParameters(Shadow);
+	ShadowRenderer->SetParameters(ShadowDataArray);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{

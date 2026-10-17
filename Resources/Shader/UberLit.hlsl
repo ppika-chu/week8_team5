@@ -54,7 +54,7 @@ struct FLightRenderParameters
     float HalfWidth;
     float HalfHeight;
     uint Type;
-    float BarnDoorCos;     // Rect 전용
+    float BarnDoorCos; // Rect 전용
     float BarnDoorSin;
     float BarnDoorLength;
     float Padding;
@@ -111,18 +111,37 @@ cbuffer LightGrid : register(b5)
     uint2 LightGridPadding;
 };
 
-cbuffer ShadowConstants : register(b6)
+/* Shadow */
+/*cbuffer ShadowConstants : register(b6)
 {
     matrix LightViewProj;
     float ShadowBias;
     uint bShadowEnabled;
     float2 ShadowPadding;
+};*/
+
+struct FShadowInfo
+{
+    matrix LightViewProjection;
+    float2 AtlasOffet;
+    float2 AtlasScale;
+    float DepthBias;
+    float3 Padding;
 };
+
+struct FLightShadowRange
+{
+    uint Offset;
+    uint Count;
+};
+
+Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
+StructuredBuffer<FShadowInfo> ShadowInfos : register(t14);
+StructuredBuffer<FLightShadowRange> LightShadowRanges : register(t15);
 
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
 StructuredBuffer<uint> CellLightIndices : register(t12);
-Texture2D<float> ShadowMap : register(t13);     // 0 ~ 1 깊이
 
 Texture2D DiffuseTexture : register(t0);
 Texture2D NormalTexture : register(t1);
@@ -132,7 +151,7 @@ struct VS_INPUT
 {
     float3 Position : POSITION;
     float3 Normal : NORMAL;
-    float4 Tangent : TANGENT;   // w = 바이탄젠트 부호
+    float4 Tangent : TANGENT; // w = 바이탄젠트 부호
     float2 UV : TEXCOORD;
     float4 Color : COLOR;
 };
@@ -205,21 +224,30 @@ float3 GetAmbientLighting()
 // return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
 float CalcDirectionalShadow(float3 WorldPos)
 {
-    if (!bShadowEnabled) return 1.0f;
+    // Disabled shadow is not included in ShadowInfos.
+    // if (!bShadowEnabled) return 1.0f;
+    // TEMP
+    const FLightShadowRange Range = LightShadowRanges[0];
+    if (Range.Count == 0)
+        return 1.0f; // 그림자 없는 Directional Light
+    
+    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset];
 
-    const float4 LightClip = mul(float4(WorldPos, 1.0f), LightViewProj);
+    const float4 LightClip = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection);
     const float3 Ndc = LightClip.xyz / LightClip.w;
     const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
+    const float2 AtlasUV = UV * DirectionalShadowInfo.AtlasScale + DirectionalShadowInfo.AtlasOffet;
 
     // any() : 벡터 성분 중 하나라도 참이면 true
-    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f) return 1.0f;      // Shadow Map 밖이면 빛을 받는 것으로 간주
+    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f)
+        return 1.0f; // Shadow Map 밖이면 빛을 받는 것으로 간주
 
     uint Width, Height;
 
-    ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 함수
-    const uint2 Texel = min(uint2(UV * float2(Width, Height)), uint2(Width-1, Height-1));    // UV = 1.0 이면 텍셀 밖이므로 clamp
-    const float MapDepth = ShadowMap.Load(int3(Texel, 0));
-    return (Ndc.z - ShadowBias > MapDepth)? 0.0f : 1.0f;
+    ShadowMapAtlas.GetDimensions(Width, Height); // 텍스처 크기(텍셀 개수) 돌려주는 함수
+    const uint2 Texel = min(uint2(AtlasUV * float2(Width, Height)), uint2(Width - 1, Height - 1)); // UV = 1.0 이면 텍셀 밖이므로 clamp
+    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
+    return (Ndc.z - DirectionalShadowInfo.DepthBias > MapDepth) ? 0.0f : 1.0f;
 }
 
 // Directional Light의 영향을 구한다
@@ -247,16 +275,16 @@ FLightContribution CalcSpotLight(FLightRenderParameters Light, float3 N, float3 
 
 FLightContribution CalcRectLight(FLightRenderParameters Light, float3 N, float3 V, float3 WorldPos, float InShininess)
 {
-    const float3 Up = cross(Light.Direction, Light.Right);  // Z축
+    const float3 Up = cross(Light.Direction, Light.Right); // Z축
     const float3 CenterToSurface = WorldPos - Light.Position;
 
     // 1) 사각형 위에서 표면과 가장 가까운 점 찾기
-    const float RectX = clamp(dot(CenterToSurface, Light.Right), -Light.HalfWidth,  Light.HalfWidth);   // 사각형 가로 좌표
-    const float RectY = clamp(dot(CenterToSurface, Up),          -Light.HalfHeight, Light.HalfHeight);  // 사각형 세로 좌표
+    const float RectX = clamp(dot(CenterToSurface, Light.Right), -Light.HalfWidth, Light.HalfWidth); // 사각형 가로 좌표
+    const float RectY = clamp(dot(CenterToSurface, Up), -Light.HalfHeight, Light.HalfHeight); // 사각형 세로 좌표
     const float3 ClosestPoint = Light.Position + Light.Right * RectX + Up * RectY;
 
     // 2) 가장 가까운 점을 점광원처럼 취급
-    float3 L;   // 표면 -> 빛
+    float3 L; // 표면 -> 빛
     const float Attenuation = GetDistanceAttenuation(ClosestPoint, Light.Radius, Light.FalloffExponent, WorldPos, L);
 
     // 3) 면의 앞쪽만 비춘다 (뒤쪽이면 0)
@@ -268,7 +296,7 @@ FLightContribution CalcRectLight(FLightRenderParameters Light, float3 N, float3 
     // Door Length가 0이면 그냥 rect (전방향)
     if (Light.BarnDoorLength > 0.0f)
     {
-        const float3 EmitterToSurface = WorldPos - ClosestPoint;     // 발광면에서 표면으로
+        const float3 EmitterToSurface = WorldPos - ClosestPoint; // 발광면에서 표면으로
         const float Distance = max(length(EmitterToSurface), 0.0001f);
         const float ForwardDist = dot(EmitterToSurface, Light.Direction);
         const float LateralX = abs(dot(EmitterToSurface, Light.Right));

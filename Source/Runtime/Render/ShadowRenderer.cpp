@@ -5,6 +5,8 @@
 #include "RenderCommand.h"
 #include "RenderingInfo.h"
 
+constexpr uint32 MaxShadowInfos = 64;
+
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
 	if (!InRenderer)
@@ -14,10 +16,20 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	Renderer = InRenderer;
 
-	ShadowCB = RenderCommand::CreateConstantBuffer(
-		sizeof(FShadowConstants));
+	ShadowInfosBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FShadowInfo),
+		MaxShadowInfos);
 
-	if (!ShadowCB || !ShadowCB->GetBuffer())
+	if (!ShadowInfosBuffer || !ShadowInfosBuffer->GetSRV())
+	{
+		return false;
+	}
+
+	LightShadowRangesBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FLightShadowRange),
+		MaxLocalLights);
+
+	if (!LightShadowRangesBuffer || !LightShadowRangesBuffer->GetSRV())
 	{
 		return false;
 	}
@@ -45,18 +57,53 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	SetParameters(FShadowConstants{});
+	SetParameters({});
 
 	return true;
 }
 
-void FShadowRenderer::SetParameters(const FShadowConstants& Parameters)
+void FShadowRenderer::SetParameters(const TArray<FShadowData>& InShadowData)
 {
-	ShadowData = Parameters;
+	ShadowInfos.Reset(MaxShadowInfos);
+	LightShadowRanges.Reset(MaxLocalLights);
+
+	for (const FShadowData& ShadowData : InShadowData)
+	{
+		// TODO: Make atlas
+
+
+		FLightShadowRange LightShadowRange{
+			.Offset = static_cast<uint32>(ShadowInfos.Num()),
+			.Count = 1 // Directional Light only for now
+		};
+
+		FShadowInfo ShadowInfo{
+			.LightViewProj = ShadowData.LightViewProj,
+			.AtlasOffset = { 0, 0 },
+			.AtlasScale = { 1, 1 },
+			.DepthBias = ShadowData.DepthBias
+		};
+
+		LightShadowRanges.Add(LightShadowRange);
+		ShadowInfos.Add(ShadowInfo);
+	}
+
+	// Make sure that there is at least one shadow info and light shadow range, even if they are empty
+	if (LightShadowRanges.Num() == 0)
+	{
+		//ShadowInfos.Add(FShadowInfo{});
+		LightShadowRanges.Add(FLightShadowRange{ .Offset = 0, .Count = 0 });
+	}
+
 	RenderCommand::UpdateBufferData(
-		ShadowCB.get(), 
-		&Parameters, 
-		sizeof(FShadowConstants));
+		ShadowInfosBuffer.get(), 
+		ShadowInfos.GetData(), 
+		static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
+
+	RenderCommand::UpdateBufferData(
+		LightShadowRangesBuffer.get(),
+		LightShadowRanges.GetData(),
+		static_cast<uint32>(LightShadowRanges.size() * sizeof(FLightShadowRange)));
 }
 
 void FShadowRenderer::BindForLighting() const
@@ -65,22 +112,22 @@ void FShadowRenderer::BindForLighting() const
 		EShaderBindFlagBits::Vertex |
 		EShaderBindFlagBits::Pixel;
 
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
+	//RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
 	RenderCommand::BindShaderResource(13, ShadowMap.get(), Stages);
+	RenderCommand::BindShaderResource(14, ShadowInfosBuffer.get(), Stages);
+	RenderCommand::BindShaderResource(15, LightShadowRangesBuffer.get(), Stages);
 }
 
 void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
 {
-	if (!IsShadowEnabled())
-	{
-		return;
-	}
+	// TEMP
+	FShadowInfo& ShadowInfo = ShadowInfos[0];
 
 	Renderer->RenderQueueSorting(
 		ShadowQueue,
-		ShadowData.LightViewProj);
+		ShadowInfo.LightViewProj);
 
-	FRenderingInfo ShadowInfo{
+	FRenderingInfo ShadowRenderingInfo{
 		.ViewportSetting = {
 			.Width = ShadowMap->GetWidth(),
 			.Height = ShadowMap->GetHeight()
@@ -95,7 +142,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
 		13,
 		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 	
-	RenderCommand::BeginRenderPass(ShadowInfo);
+	RenderCommand::BeginRenderPass(ShadowRenderingInfo);
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::ShadowDepth);
@@ -104,10 +151,10 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	
 	Renderer->RenderPreparedDepth(
-		ShadowData.LightViewProj, true);
+		ShadowInfo.LightViewProj, true);
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::SolidBack);
 
-	RenderCommand::EndRenderPass(ShadowInfo);
+	RenderCommand::EndRenderPass(ShadowRenderingInfo);
 }
