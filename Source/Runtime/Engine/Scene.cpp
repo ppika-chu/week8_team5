@@ -189,7 +189,7 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		if (Size > 0.0f)		
 		{
 			Shadow.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size);
-			Proxy->GetLightComponent()->GetShadowBias();
+			Shadow.ShadowBias = Proxy->GetLightComponent()->GetShadowBias();
 			Shadow.bShadowEnabled = 1;
 		}
 		break;                                            // 셰이더는 하나만 받음
