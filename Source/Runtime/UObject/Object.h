@@ -39,7 +39,7 @@ public: \
     InClass->AddPropertyMeta<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), FPropertyMeta{ __VA_ARGS__ });
 
 #define PROPERTY_META_FLAGS(PropertyName, Flags, ...) \
-    InClass->AddPropertyWithMeta<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), FPropertyMeta{ __VA_ARGS__ }, Flags);
+    InClass->AddPropertyMeta<decltype(ThisClass::PropertyName)>(#PropertyName, offsetof(ThisClass, PropertyName), FPropertyMeta{ __VA_ARGS__ }, Flags);
 
 #define REFLECT_END()\
 	};\
