@@ -150,9 +150,9 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer)
+void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 {
-	if (!Renderer) return;
+	if (!Renderer || !ShadowRenderer) return;
 
 	// Shadow 계산하기 위한 인자값들
 	FBox Bounds = BVH.GetRootBounds();
@@ -196,7 +196,7 @@ void FScene::UpdateLights(FRenderer* Renderer)
 
 	}
 	// Light 없으면 bShadowEnabled = 0
-	Renderer->SetShadow(Shadow);
+	ShadowRenderer->SetParameters(Shadow);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{
