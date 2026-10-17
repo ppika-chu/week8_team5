@@ -34,70 +34,91 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	D3D11_TEXTURE2D_DESC Desc{
-		.Width = 2048,
-		.Height = 2048,
-		.MipLevels = 1,
-		.ArraySize = 1,
-		.Format = DXGI_FORMAT_R24G8_TYPELESS,
-		.SampleDesc = {
-			.Count = 1,
-			.Quality = 0
-		},
-		.Usage = D3D11_USAGE_DEFAULT,
-		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
-	};
-
-	ShadowMap = RenderCommand::CreateTexture2D(Desc);
-	
-	if (!ShadowMap ||
-		!ShadowMap->GetDSV() ||
-		!ShadowMap->GetSRV())
+	if (!ShadowAtlas.Init(2048, 1024))
 	{
 		return false;
 	}
 
-	SetParameters({});
+	SetParameters({}, 0);
 
 	return true;
 }
 
-void FShadowRenderer::SetParameters(const TArray<FShadowData>& InShadowData)
+void FShadowRenderer::SetParameters(
+	const TArray<FLightShadowData>& Lights,
+	uint32 LightSlotCount)
 {
+	ShadowAtlas.ResetAllocations();
+
 	ShadowInfos.Reset(MaxShadowInfos);
-	LightShadowRanges.Reset(MaxLocalLights);
+	ShadowAllocations.Reset(MaxShadowInfos);
+	LightShadowRanges.Reset(LightSlotCount);
 
-	for (const FShadowData& ShadowData : InShadowData)
+	const uint32 SlotCount = LightSlotCount > 0 ? LightSlotCount : 1;
+
+	// Ensure SlotCount <= size of range buffer
+	for (uint32 i = 0; i < SlotCount; ++i)
 	{
-		// TODO: Make atlas
-
-
-		FLightShadowRange LightShadowRange{
-			.Offset = static_cast<uint32>(ShadowInfos.Num()),
-			.Count = 1 // Directional Light only for now
-		};
-
-		FShadowInfo ShadowInfo{
-			.LightViewProj = ShadowData.LightViewProj,
-			.AtlasOffset = { 0, 0 },
-			.AtlasScale = { 1, 1 },
-			.DepthBias = ShadowData.DepthBias
-		};
-
-		LightShadowRanges.Add(LightShadowRange);
-		ShadowInfos.Add(ShadowInfo);
+		LightShadowRanges.Add(FLightShadowRange{});
 	}
 
-	// Make sure that there is at least one shadow info and light shadow range, even if they are empty
-	if (LightShadowRanges.Num() == 0)
+	for (const FLightShadowData& Light : Lights)
 	{
-		//ShadowInfos.Add(FShadowInfo{});
-		LightShadowRanges.Add(FLightShadowRange{ .Offset = 0, .Count = 0 });
+		if (Light.LightIndex >= SlotCount)
+			continue;
+
+		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
+
+		// Skip if no shadow maps or not enough space in the atlas or shadow info buffer
+		if (MapCount == 0 ||
+			MapCount > ShadowAtlas.GetRemainingTileCount() ||
+			static_cast<uint32>(ShadowInfos.Num()) + MapCount > MaxShadowInfos)
+		{
+			continue;
+		}
+
+		FLightShadowRange Range{
+			.Offset = static_cast<uint32>(ShadowInfos.Num()),
+		};
+
+		for (const FShadowData& Data : Light.Maps)
+		{
+			FShadowAtlasAllocation Allocation{};
+			if (!ShadowAtlas.Allocate(&Allocation))
+			{
+				break;
+			}
+
+			const float InvAtlasSize =
+				1.0f
+				/ static_cast<float>(ShadowAtlas.GetSize());
+
+			FShadowInfo ShadowInfo{
+				.LightViewProj = Data.LightViewProj,
+				.AtlasOffset = {
+					Allocation.X * InvAtlasSize,
+					Allocation.Y * InvAtlasSize
+				},
+				.AtlasScale = {
+					Allocation.Width * InvAtlasSize,
+					Allocation.Height * InvAtlasSize
+				},
+				.DepthBias = Data.DepthBias
+			};
+
+			ShadowInfos.Add(ShadowInfo);
+			ShadowAllocations.Add(Allocation);
+		};
+
+		Range.Count = static_cast<uint32>(
+			ShadowInfos.Num() - Range.Offset);
+
+		LightShadowRanges[Light.LightIndex] = Range;
 	}
 
 	RenderCommand::UpdateBufferData(
-		ShadowInfosBuffer.get(), 
-		ShadowInfos.GetData(), 
+		ShadowInfosBuffer.get(),
+		ShadowInfos.GetData(),
 		static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
 
 	RenderCommand::UpdateBufferData(
@@ -113,48 +134,66 @@ void FShadowRenderer::BindForLighting() const
 		EShaderBindFlagBits::Pixel;
 
 	//RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
-	RenderCommand::BindShaderResource(13, ShadowMap.get(), Stages);
+	RenderCommand::BindShaderResource(13, ShadowAtlas.GetTexture(), Stages);
 	RenderCommand::BindShaderResource(14, ShadowInfosBuffer.get(), Stages);
 	RenderCommand::BindShaderResource(15, LightShadowRangesBuffer.get(), Stages);
 }
 
-void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
+void FShadowRenderer::BeginShadowPass()
 {
-	// TEMP
-	FShadowInfo& ShadowInfo = ShadowInfos[0];
+	constexpr auto Stages =
+		EShaderBindFlagBits::Vertex |
+		EShaderBindFlagBits::Pixel;
+
+	RenderCommand::UnbindShaderResource(13, Stages);
+
+	FRenderingInfo Pass{
+		.ViewportSetting = {
+			.Width = ShadowAtlas.GetSize(),
+			.Height = ShadowAtlas.GetSize(),
+		},
+		.DepthStencil = {
+			.Texture = ShadowAtlas.GetTexture(),
+			.LoadOp = ERenderTargetLoadOp::Clear
+		}
+	};
+
+	RenderCommand::BeginRenderPass(Pass);
+
+	RenderCommand::SetRasterizerState(
+		ERasterizerState::ShadowDepth);
+	RenderCommand::SetPrimitiveTopology(
+		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+}
+
+void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
+{
+	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	const FShadowAtlasAllocation& Tile =
+		ShadowAllocations[ShadowInfoIndex];
+
+	RenderCommand::SetViewport(
+		Tile.X, Tile.Y, Tile.Width, Tile.Height
+	);
 
 	Renderer->RenderQueueSorting(
 		ShadowQueue,
 		ShadowInfo.LightViewProj);
 
-	FRenderingInfo ShadowRenderingInfo{
-		.ViewportSetting = {
-			.Width = ShadowMap->GetWidth(),
-			.Height = ShadowMap->GetHeight()
-		},
+	Renderer->RenderPreparedDepth(
+		ShadowInfo.LightViewProj, true);
+}
+
+void FShadowRenderer::EndShadowPass()
+{
+	FRenderingInfo Pass{
 		.DepthStencil = {
-			.Texture = ShadowMap.get(),
-			.LoadOp = ERenderTargetLoadOp::Clear
+			.Texture = ShadowAtlas.GetTexture()
 		}
 	};
 
-	RenderCommand::UnbindShaderResource(
-		13,
-		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-	
-	RenderCommand::BeginRenderPass(ShadowRenderingInfo);
-
-	RenderCommand::SetRasterizerState(
-		ERasterizerState::ShadowDepth);
-
-	RenderCommand::SetPrimitiveTopology(
-		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	
-	Renderer->RenderPreparedDepth(
-		ShadowInfo.LightViewProj, true);
+	RenderCommand::EndRenderPass(Pass);
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::SolidBack);
-
-	RenderCommand::EndRenderPass(ShadowRenderingInfo);
 }

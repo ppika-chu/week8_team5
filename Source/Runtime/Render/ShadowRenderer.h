@@ -2,6 +2,7 @@
 #include "Buffer.h"
 #include "Texture2D.h"
 #include "RenderPacket.h"
+#include "ShadowAtlas.h"
 
 class FRenderer;
 
@@ -10,6 +11,12 @@ struct FShadowData
 {
 	FMatrix LightViewProj;
 	float DepthBias;
+};
+
+struct FLightShadowData
+{
+	uint32 LightIndex;			// Index for LightShadowRanges
+	TArray<FShadowData> Maps;
 };
  
 struct alignas(16) FShadowInfo
@@ -34,8 +41,12 @@ class FShadowRenderer
 public:
 	bool Init(FRenderer* InRenderer);
 
-	void SetParameters(const TArray<FShadowData>& InShadowData);
-	void OnRender(FRenderQueue& ShadowQueue);
+	void SetParameters(
+		const TArray<FLightShadowData>& Lights,
+		uint32 LightSlotCount);
+	void BeginShadowPass();
+	void OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex);
+	void EndShadowPass();
 	void BindForLighting() const;
 
 	const TArray<FShadowInfo>& GetShadowInfos() const { return ShadowInfos; }
@@ -43,19 +54,20 @@ public:
 
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
 	//const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
-	FTexture2D* GetShadowMap() const { return ShadowMap.get(); }
+	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
 
 private:
 	FRenderer* Renderer = nullptr;
 
 	// Shadow
 	//TUniquePtr<FConstantBuffer> ShadowCB{};
-	TUniquePtr<FTexture2D> ShadowMap{};
+	FShadowAtlas ShadowAtlas{};
 	//FShadowConstants ShadowData{};
 
 	TUniquePtr<FStructuredBuffer> ShadowInfosBuffer{};
 	TUniquePtr<FStructuredBuffer> LightShadowRangesBuffer{};
 
-	TArray<FShadowInfo> ShadowInfos{};
 	TArray<FLightShadowRange> LightShadowRanges{};
+	TArray<FShadowInfo> ShadowInfos{};
+	TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
 };

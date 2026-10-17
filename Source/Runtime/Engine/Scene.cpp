@@ -175,7 +175,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 	}
 	
 	//FShadowConstants Shadow{};		// bShadowEnabled = 0
-	TArray<FShadowData> ShadowDataArray;
+	TArray<FLightShadowData> Lights;
 	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
 	{
 		if (!Proxy->IsVisible()) continue;
@@ -193,12 +193,17 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 				.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size),
 				.DepthBias = Proxy->GetLightComponent()->GetShadowBias()
 			};
-			ShadowDataArray.Add(ShadowData);
+
+			FLightShadowData Directional{};
+			Directional.LightIndex = 0;
+			Directional.Maps.Add(ShadowData);
+
+			Lights.Add(Directional);
 		}
 		break;                                            // 셰이더는 하나만 받음
 	}
 	// Light 없으면 bShadowEnabled = 0
-	ShadowRenderer->SetParameters(ShadowDataArray);
+	ShadowRenderer->SetParameters(Lights, 2);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{
