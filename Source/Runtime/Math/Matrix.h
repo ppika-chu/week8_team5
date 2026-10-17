@@ -52,6 +52,7 @@ public:
 	void SetOrigin(const FVector& NewOrigin);
 
 	static FMatrix MakeTranslation(const FVector& T);
+	static FMatrix MakeOrthographic(float Width, float Height, float NearZ, float FarZ);
 
 	//void To3x4MatrixTranspose(float* Out) const;
 	// FMatrix TransposeAdjoint();

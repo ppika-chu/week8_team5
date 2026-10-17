@@ -5,6 +5,7 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/RectLightComponent.h"
+#include "Math/BVH.h"
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
@@ -153,10 +154,17 @@ void FScene::UpdateLights(FRenderer* Renderer)
 {
 	if (!Renderer) return;
 
+	// Shadow 계산하기 위한 인자값들
+	FBox Bounds = BVH.GetRootBounds();
+	FVector Center = (Bounds.Max + Bounds.Min) * 0.5f;
+	float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
+	float Depth = 2 * Radius;	// 빛 방향 (Forward)
+	float Size = 2 * Radius;	// 빛에 수직인 방향 (Right, Up)
+	
 	FLightingConstants Constants{};
 	Constants.Ambient.Color = FVector(1, 1, 1);
 	Constants.Ambient.Intensity = 0.0f;
-
+	
 	for (USkyLightComponent* Sky : SkyLights)            // 기존 Sky 코드 그대로
 	{
 		if (!Sky->IsVisible()) continue;
@@ -165,17 +173,30 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		Constants.Ambient.Intensity = Sky->GetIntensity();
 		break;
 	}
-
+	
+	FShadowConstants Shadow{};		// bShadowEnabled = 0
 	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
 	{
 		if (!Proxy->IsVisible()) continue;
+		
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
 		Constants.Directional.Direction = P.Direction;
 		Constants.Directional.Color = P.Color;
 		Constants.Directional.Intensity = P.Intensity;
+
+		// 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
+		if (Size > 0.0f)		
+		{
+			Shadow.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size);
+			Shadow.ShadowBias = Proxy->GetLightComponent()->GetShadowBias();
+			Shadow.bShadowEnabled = 1;
+		}
 		break;                                            // 셰이더는 하나만 받음
+
 	}
+	// Light 없으면 bShadowEnabled = 0
+	Renderer->SetShadow(Shadow);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{

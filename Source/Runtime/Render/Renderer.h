@@ -102,13 +102,22 @@ struct alignas(16) FLightingConstants
 	uint32 NumLocalLights;
 	uint32 Padding[3];
 };
-static_assert(sizeof(FLightingConstants) == 64);
+
+struct alignas(16) FShadowConstants
+{
+	FMatrix LightViewProj;		// 64
+	float ShadowBias;
+	uint32 bShadowEnabled;
+	float Padding[2];			// 16
+};
 
 static_assert(sizeof(FAmbientLightInfo) == 16);
 static_assert(sizeof(FDirectionalLightInfo) == 32);
 static_assert(sizeof(FPointLightInfo) == 48);
 static_assert(sizeof(FSpotLightInfo) == 64);
 static_assert(sizeof(FRectLightInfo) == 80);
+static_assert(sizeof(FLightingConstants) == 64);
+static_assert(sizeof(FShadowConstants) == 80);
 
 //static_assert(sizeof(FLightingConstants) == 512);	// UberLit.hlsl cbuffer Lighting 크기 (fxc 리플렉션 기준)
 
@@ -205,7 +214,7 @@ public:
 
 	// 큐를 Material, Opaque, Mesh에 따라 정렬한다
 	// CameraWorldPos는 ViewProjection과 함께 b0에 올라가 Specular 계산(V 벡터)에 쓰인다.
-	void RenderQueueSorting(FRenderQueue& InQueue, const FMatrix& ViewProjection, const FVector& CameraWorldPos);
+	void RenderQueueSorting(FRenderQueue& InQueue, const FMatrix& ViewProjection, const FVector& CameraWorldPos  = {});
 
 	// Depth Prepass: 불투명만 PS 없이 그려 깊이 버퍼를 채운다. RenderQueueSorting 뒤, RenderOpaque 전에 부른다.
 	// 같은 VS·행렬이라 깊이가 비트 단위로 같으므로 본 패스는 LESS_EQUAL로 통과한다.
@@ -221,6 +230,7 @@ public:
 
 	//void SetFireBallLight(const FFireBallLightConstants& LightConstants);
 	void SetLighting(FLightingConstants& LightingConstants, const TArray<FLightRenderParameters>& InLocalLights);
+	void SetShadow(const FShadowConstants& ShadowConstants);
 
 	// 이후 그리는 UberLit 머티리얼이 쓸 조명 모델. View마다 RenderOpaque 전에 설정한다.
 	void SetViewMode(EViewMode InViewMode);
@@ -233,6 +243,12 @@ public:
 	void SetLightDebugMode(uint32 Mode);
 	void SetLightCullingMode(ELightCullingMode Mode) { LightCullingMode = Mode; }
 	ELightCullingMode GetLightCullingMode() const { return LightCullingMode; }
+
+	void RenderShadowDepth();
+	FTexture2D* GetShadowMap() const { return ShadowMap.get(); }
+	bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
+	const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
+
 private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection);
 	void DrawStaticGroups();
@@ -286,6 +302,11 @@ private:
 	// UberLit의 b4. FireBall이 b3를 쓰는 동안은 슬롯을 나눠 둔다.
 	TUniquePtr<FConstantBuffer> LightingCB;
 	TUniquePtr<FConstantBuffer> LightCullingCB{};
+
+	// Shadow
+	TUniquePtr<FConstantBuffer> ShadowCB{};
+	TUniquePtr<FTexture2D> ShadowMap{};
+	FShadowConstants ShadowData{};
 
 	TUniquePtr<FStructuredBuffer> TileIndexBuffer{};
 	TUniquePtr<FStructuredBuffer> LocalLightBuffer{};

@@ -317,6 +317,16 @@ void FRenderDevice::CreateStates()
 		Desc.FillMode = D3D11_FILL_WIREFRAME;
 		Desc.CullMode = D3D11_CULL_NONE;
 		Device->CreateRasterizerState(&Desc, RasterizerStates[(uint8)ERasterizerState::Wireframe].GetAddressOf());
+	
+		// ShadowDepth
+		Desc.FillMode = D3D11_FILL_SOLID;
+		Desc.CullMode = D3D11_CULL_BACK;
+		// 아래는 Parameter Tuning 필요
+		Desc.DepthBias = 1000;
+		Desc.SlopeScaledDepthBias = 1.5f;
+		Desc.DepthBiasClamp = 0.0f;
+
+		Device->CreateRasterizerState(&Desc, RasterizerStates[(uint8)ERasterizerState::ShadowDepth].GetAddressOf());
 	}
 
 	// ---------- DepthStencil ----------

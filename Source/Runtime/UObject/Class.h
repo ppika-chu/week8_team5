@@ -47,6 +47,13 @@ public:
 	{
 		Properties.Add({ InName, InType, InOffset, sizeof(T), nullptr, InFlags });
 	}
+
+	template <typename T>
+	void AddPropertyMeta(const FString& InName, uint64 InOffset, const FPropertyMeta& InMeta, uint32 InFlags = CPF_Default)
+	{
+		AddProperty<T>(InName, InOffset, InFlags);
+		Properties.Last().Meta = InMeta;
+	}
 private:
 	mutable int32 ClassUnique = 0;
 	friend FName MakeUniqueObjectName(UObject*, const UClass*, FName);

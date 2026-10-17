@@ -80,6 +80,16 @@ bool FRenderer::Init()
 	LightCullingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightCullingConstants));
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
+	ShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FShadowConstants));
+
+	D3D11_TEXTURE2D_DESC Desc{};
+	Desc.Width = Desc.Height = 2048;
+	Desc.MipLevels = 1; Desc.ArraySize = 1;
+	Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+	Desc.SampleDesc.Count = 1;
+	Desc.Usage = D3D11_USAGE_DEFAULT;
+	Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+	ShadowMap = RenderCommand::CreateTexture2D(Desc);
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
 	const FLightGridConstants GridConstants{};
@@ -168,6 +178,8 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 	RenderCommand::BindShaderResource(10, LocalLightBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 	RenderCommand::BindShaderResource(12, TileIndexBuffer.get(), EShaderBindFlagBits::Pixel);
 	RenderCommand::BindConstantBuffer(5, GridLightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindShaderResource(13, ShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
@@ -182,6 +194,8 @@ void FRenderer::RenderTranslucent(const FMatrix& ViewProjection)
 	// 2.5D 목록은 불투명 깊이 범위만 담으므로, 불투명보다 앞에 있는 반투명은 전체 순회로 그린다.
 	FConstantBuffer* GridCB = LightCullingMode == ELightCullingMode::Tiled25D ? GridLightingFallbackCB.get() : GridLightingCB.get();
 	RenderCommand::BindConstantBuffer(5, GridCB, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+	RenderCommand::BindShaderResource(13, ShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
 	DrawPackets(FirstTranslucentIndex, SortEntries.Num(), ViewProjection);
 	RenderPackets.Reset();
@@ -277,13 +291,26 @@ void FRenderer::RenderDepth(const FMatrix& ViewProjection)
 {
 	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
 	bDepthOnly = true;
-	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
 	bDepthOnly = false;
 
 	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
 	LastMesh = nullptr;
 	LastMaterial = nullptr;
+}
+
+void FRenderer::RenderShadowDepth()
+{
+	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
+	bDepthOnly = true;
+	DrawStaticGroups();
+	DrawPackets(0, FirstTranslucentIndex, ShadowData.LightViewProj);
+	bDepthOnly = false;
+
+	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
+	LastMesh = nullptr;
+	LastMaterial = nullptr;
+
 }
 
 // 정렬된 패킷 중 [Begin, End) 범위를 View 행렬과 Section 범위로 그린다.
@@ -616,6 +643,13 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 	GridConstants.LightDebugMode = LightDebugMode;
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 }
+
+void FRenderer::SetShadow(const FShadowConstants& ShadowConstants)
+{	
+	ShadowData = ShadowConstants; 
+	RenderCommand::UpdateBufferData(ShadowCB.get(), &ShadowConstants, sizeof(FShadowConstants));
+}
+
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)
 {
