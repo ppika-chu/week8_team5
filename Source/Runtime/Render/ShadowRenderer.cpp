@@ -69,18 +69,18 @@ void FShadowRenderer::BindForLighting() const
 	RenderCommand::BindShaderResource(13, ShadowMap.get(), Stages);
 }
 
-void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
+// Cascade N장은 같은 Resource 사용하므로 패스마다 unbind할 필요없음.
+void FShadowRenderer::BeginShadowPasses()
 {
-	if (!IsShadowEnabled())
-	{
-		return;
-	}
+	RenderCommand::UnbindShaderResource(
+	13,
+	EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
+}
 
-	Renderer->RenderQueueSorting(
-		ShadowQueue,
-		ShadowData.LightViewProj);
-
-	FRenderingInfo ShadowInfo{
+// Index 번 Cascade의 깊이를 rendering.
+void FShadowRenderer::RenderCascade(uint32 Index, FRenderQueue& Queue)
+{
+	FRenderingInfo Target{
 		.ViewportSetting = {
 			.Width = ShadowMap->GetWidth(),
 			.Height = ShadowMap->GetHeight()
@@ -90,24 +90,17 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
 			.LoadOp = ERenderTargetLoadOp::Clear
 		}
 	};
+	RenderDepthToTarget(Queue, GetCascadeViewProjection(Index), Target);
+}
 
-	RenderCommand::UnbindShaderResource(
-		13,
-		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-	
-	RenderCommand::BeginRenderPass(ShadowInfo);
+void FShadowRenderer::RenderDepthToTarget(FRenderQueue& Queue, const FMatrix& LightViewProj, const FRenderingInfo& Target)
+{
+	RenderCommand::BeginRenderPass(Target);
+	Renderer->RenderQueueSorting(Queue, LightViewProj);
+	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
+	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	Renderer->RenderPreparedDepth(LightViewProj, true);
+	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
+	RenderCommand::EndRenderPass(Target);
 
-	RenderCommand::SetRasterizerState(
-		ERasterizerState::ShadowDepth);
-
-	RenderCommand::SetPrimitiveTopology(
-		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	
-	Renderer->RenderPreparedDepth(
-		ShadowData.LightViewProj, true);
-
-	RenderCommand::SetRasterizerState(
-		ERasterizerState::SolidBack);
-
-	RenderCommand::EndRenderPass(ShadowInfo);
 }
