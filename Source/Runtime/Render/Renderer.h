@@ -103,21 +103,12 @@ struct alignas(16) FLightingConstants
 	uint32 Padding[3];
 };
 
-struct alignas(16) FShadowConstants
-{
-	FMatrix LightViewProj;		// 64
-	float ShadowBias;
-	uint32 bShadowEnabled;
-	float Padding[2];			// 16
-};
-
 static_assert(sizeof(FAmbientLightInfo) == 16);
 static_assert(sizeof(FDirectionalLightInfo) == 32);
 static_assert(sizeof(FPointLightInfo) == 48);
 static_assert(sizeof(FSpotLightInfo) == 64);
 static_assert(sizeof(FRectLightInfo) == 80);
 static_assert(sizeof(FLightingConstants) == 64);
-static_assert(sizeof(FShadowConstants) == 80);
 
 //static_assert(sizeof(FLightingConstants) == 512);	// UberLit.hlsl cbuffer Lighting 크기 (fxc 리플렉션 기준)
 
@@ -230,7 +221,6 @@ public:
 
 	//void SetFireBallLight(const FFireBallLightConstants& LightConstants);
 	void SetLighting(FLightingConstants& LightingConstants, const TArray<FLightRenderParameters>& InLocalLights);
-	void SetShadow(const FShadowConstants& ShadowConstants);
 
 	// 이후 그리는 UberLit 머티리얼이 쓸 조명 모델. View마다 RenderOpaque 전에 설정한다.
 	void SetViewMode(EViewMode InViewMode);
@@ -244,11 +234,7 @@ public:
 	void SetLightCullingMode(ELightCullingMode Mode) { LightCullingMode = Mode; }
 	ELightCullingMode GetLightCullingMode() const { return LightCullingMode; }
 
-	void RenderShadowDepth();
-	FTexture2D* GetShadowMap() const { return ShadowMap.get(); }
-	bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
-	const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
-
+	void RenderPreparedDepth(const FMatrix& ViewProjection, bool bIncludeStaticGroups);
 private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection);
 	void DrawStaticGroups();
@@ -302,11 +288,6 @@ private:
 	// UberLit의 b4. FireBall이 b3를 쓰는 동안은 슬롯을 나눠 둔다.
 	TUniquePtr<FConstantBuffer> LightingCB;
 	TUniquePtr<FConstantBuffer> LightCullingCB{};
-
-	// Shadow
-	TUniquePtr<FConstantBuffer> ShadowCB{};
-	TUniquePtr<FTexture2D> ShadowMap{};
-	FShadowConstants ShadowData{};
 
 	TUniquePtr<FStructuredBuffer> TileIndexBuffer{};
 	TUniquePtr<FStructuredBuffer> LocalLightBuffer{};

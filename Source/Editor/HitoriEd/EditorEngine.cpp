@@ -115,6 +115,9 @@ bool UEditorEngine::Init()
 	ToneMapRenderer = MakeUnique<FToneMapRenderer>();
 	ToneMapRenderer->Init();
 
+	ShadowRenderer = MakeUnique<FShadowRenderer>();
+	ShadowRenderer->Init(Renderer);
+
 
 	// 필요한 Panel들 추가후 raw pointer 반환(소유권 = EditorUI)
 	DetailsPanel = EditorUI->AddEditorPanel<FDetailsPanel>();
@@ -420,7 +423,7 @@ void UEditorEngine::RenderMultipleViewports()
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
 			// ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer);
+			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
 			RenderShadowPass();
 			CapturedWorld = ViewWorld;
 		}
@@ -452,7 +455,7 @@ void UEditorEngine::RenderMultipleViewports()
 			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer);
+			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
 			CapturedWorld = ViewWorld;
 		}
 
@@ -618,6 +621,7 @@ void UEditorEngine::RenderOpaquePass(const int32 ViewIndex, const FRenderingInfo
 		// Grid 파이프라인이 바꾼 상태를 장면 기준으로 되돌린 뒤 반투명을 먼 것부터 그린다.
 		RenderCommand::SetRasterizerState(SceneRasterizerState);
 		RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ShadowRenderer->BindForLighting();
 		Renderer->RenderTranslucent(ViewProjection);
 		RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
 	}
@@ -896,30 +900,13 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 
 void UEditorEngine::RenderShadowPass()
 {
-	if (!SettingsPanel->GetSettings().bDrawPrimitives || !Renderer->IsShadowEnabled()) return;
+	if (!SettingsPanel->GetSettings().bDrawPrimitives || 
+		!ShadowRenderer->IsShadowEnabled()) return;
 
-	const FMatrix LightViewProj = Renderer->GetShadowViewProjection();
+	const FMatrix& LightViewProj = ShadowRenderer->GetShadowViewProjection();
 	MultipleViewportsAdapter.BuildShadowQueue(LightViewProj, ShadowQueue);
 
-	// 카메라 안 넘겨도 됨. (Specular 계산용임)
-	Renderer->RenderQueueSorting(ShadowQueue, LightViewProj);
-
-	FTexture2D* ShadowMap = Renderer->GetShadowMap();
-	FRenderingInfo ShadowInfo;
-	ShadowInfo.ViewportSetting.Width = ShadowMap->GetWidth();
-	ShadowInfo.ViewportSetting.Height = ShadowMap->GetHeight();
-	ShadowInfo.DepthStencil.Texture = ShadowMap;
-	ShadowInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;		// 깊이 1.0으로 Clear
-
-	// ShadowMap이 SRV로 묶여 있으므로 DSV 전환 전 UnBind
-	RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-
-	RenderCommand::BeginRenderPass(ShadowInfo);
-	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
-	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	Renderer->RenderShadowDepth();
-	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);		// 원복
-	RenderCommand::EndRenderPass(ShadowInfo);
+	ShadowRenderer->OnRender(ShadowQueue);
 
 }
 
@@ -976,7 +963,7 @@ void UEditorEngine::UpdateGizmoAndPicking()
 // View 행렬로 Scene·Grid·Gizmo·텍스트·Outline을 렌더한다.
 void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderQueue, FRenderQueue& IconQueue, FRenderQueue& ArrowQueue)
 {
-
+	ShadowRenderer->BindForLighting();
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
 
 	if (SettingsPanel->GetSettings().bDepthView)
