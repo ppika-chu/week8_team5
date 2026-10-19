@@ -48,6 +48,13 @@ struct FEditorSettings
 
 	int32 LightDebugMode = 0;
 	int32 LightCullingMode = 1;	// ELightCullingMode: 0 Tiled 1 Clustered 2 Tiled 2.5D
+
+	// Shadow (CSM)
+	int32 NumCascades = 3;				// 1 ~ Max (4) 사이값    *Max 값은 ShadowCascade.h 에 정의해둠.
+	float ShadowDistance = 50.0f;		// 그림자 그리는 거리
+	float CascadeSplitLambda = 0.7f;	// 0 : 균등 분할, 1 : 로그 분할
+	float CascadeBlendWidth = 0.1f;		// Cascade 경계 블렌드 폭 
+	bool  bDebugCascades  = false;  	// Cascade 번호로 색 표시
 };
 
 

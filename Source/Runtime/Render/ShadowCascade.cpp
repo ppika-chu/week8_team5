@@ -32,7 +32,7 @@ void GetSliceCorners(const FVector Near[4], const FVector Far[4], float CamNear,
 	}
 }
 
-FMatrix FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, const FBox& SceneBounds, uint32 TileSize)
+FMatrix FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, uint32 TileSize)
 {
 	// 감싸는 구 - 카메라가 회전해도 크기가 변하지 않음
     FVector Center(0.0f, 0.0f, 0.0f);
@@ -53,22 +53,30 @@ FMatrix FitCascade(const FVector Corners[8], const FVector& F, const FVector& R,
 	Center += R * (std::floor(CX / Texel) * Texel - CX);
 	Center += U * (std::floor(CY / Texel) * Texel - CY);
 
-	// near/far를 씬 Bounds 양 끝에 고정
-	const FVector Nearest(
-		F.X >= 0 ? SceneBounds.Min.X : SceneBounds.Max.X,
-		F.Y >= 0 ? SceneBounds.Min.Y : SceneBounds.Max.Y,
-		F.Z >= 0 ? SceneBounds.Min.Z : SceneBounds.Max.Z);
-	const FVector Farthest(
-		F.X >= 0 ? SceneBounds.Max.X : SceneBounds.Min.X,
-		F.Y >= 0 ? SceneBounds.Max.Y : SceneBounds.Min.Y,
-		F.Z >= 0 ? SceneBounds.Max.Z : SceneBounds.Min.Z);
+    constexpr float ShadowNearDistance = 100.0f;
 
-	const float TNear = FMath::Min(-Radius, F.Dot(Nearest  - Center));
-	const float TFar = FMath::Max( Radius, F.Dot(Farthest - Center));
+	const float TNear = -FMath::Max( Radius, ShadowNearDistance );
+	const float TFar = Radius;
 
 	const FVector Eye = Center + F * TNear;
-	const float Depth = TFar - TNear;
+	const float Depth = TFar - TNear;           // 카메라가 움직여도 
 
 	// Light View * LIght Projection
 	return FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth);
+}
+
+void ComputeCascadeSplits(float Near, float Far, uint32 Count, float Lambda, float OutSplits[MaxCascades + 1])
+{
+    const float SafeNear = FMath::Max(Near, 0.01f);
+
+    OutSplits[0] = Near;
+    for (uint32 i = 1; i < Count; ++i)
+    {
+        const float T = static_cast<float>(i) / static_cast<float>(Count);      // 배율 
+        const float Log = SafeNear * std::pow(( Far / SafeNear ), T);           // 로그 분할
+        const float Uniform = Near + (Far - Near) * T;                          // 균등 분할
+        OutSplits[i] = Lambda * Log + (1-Lambda) * Uniform;                     // 로그 + 균등 섞어 씀 ( 로그만 쓰면 첫 cascade가 너무 좁음 )
+    }
+
+    OutSplits[Count] = Far;
 }

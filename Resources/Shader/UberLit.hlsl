@@ -125,7 +125,7 @@ cbuffer LightGrid : register(b5)
 struct FShadowInfo
 {
     matrix LightViewProjection;
-    float2 AtlasOffet;
+    float2 AtlasOffset;
     float2 AtlasScale;
     float DepthBias;
     float3 Padding;
@@ -135,7 +135,8 @@ struct FLightShadowRange
 {
     uint Offset;
     uint Count;
-    uint2 Padding;
+    float BlendWidth;
+    uint bDebugCascades;
 };
 
 Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
@@ -224,7 +225,52 @@ float3 GetAmbientLighting()
     return Ambient.Color * Ambient.Intensity;
 }
 
-// return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
+// 월드 좌표 -> 맵 UV (0 ~ 1), uv 밖이거나 far 바깥이면 false
+bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out float OutDepth)
+{
+    const float4 Clip = mul(float4(WorldPos, 1.0f), LightVP);
+    OutUV = 0.0f;
+    OutDepth = 0.0f;
+    if (Clip.w <= 0.0f)
+        return false;
+    const float3 Ndc = Clip.xyz / Clip.w;
+    OutUV = float2(Ndc.x * 0.5f + 0.5f, -Ndc.y * 0.5f + 0.5f);
+    OutDepth = Ndc.z;
+    return all(OutUV >= 0.0f) && all(OutUV <= 1.0f) && OutDepth <= 1.0f;
+}
+
+// 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
+float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth)
+{
+    uint Width, Height;
+    ShadowMapAtlas.GetDimensions(Width, Height);        // 텍스처 크기(텍셀 개수) 돌려주는 함수
+    const float2 AtlasSize = float2(Width, Height);
+
+    // 타일 경계를 넘어 옆 타일을 읽지 않도록 타일 범위로 clamp
+    const uint2 TileMin = uint2(Info.AtlasOffset * AtlasSize);
+    const uint2 TileMax = TileMin + uint2(Info.AtlasScale * AtlasSize) - 1;
+    const uint2 Texel = clamp(uint2((UV * Info.AtlasScale + Info.AtlasOffset) * AtlasSize), TileMin, TileMax);
+
+    const float2 AtlasUV = UV * Info.AtlasScale + Info.AtlasOffset;
+    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
+
+    return (Depth - Info.DepthBias > MapDepth) ? 0.0f : 1.0f;
+}
+
+// 픽셀을 cascade index로 반환 (debug용)
+uint FindCascadeIndex(float3 WorldPos)
+{
+    const FLightShadowRange Range = LightShadowRanges[0];
+    for (uint i = 0; i < Range.Count; ++i)
+    {
+        float2 UV; float Depth;
+        if (ProjectToShadowMap(WorldPos, ShadowInfos[Range.Offset + i].LightViewProjection, UV, Depth))
+            return i;
+    }
+    // 모든 Cascade 밖이면 Count 반환
+    return Range.Count;
+}
+
 float CalcDirectionalShadow(float3 WorldPos)
 {
     // Disabled shadow is not included in ShadowInfos.
@@ -233,26 +279,39 @@ float CalcDirectionalShadow(float3 WorldPos)
     // Currently, we only support one directional light,
     // so we reserve the slot 0 for directional light shadow info.
     const FLightShadowRange Range = LightShadowRanges[0];
-    if (Range.Count == 0)
-        return 1.0f; // 그림자 없는 Directional Light
-    
-    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset];
 
-    const float4 LightClip = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection);
-    const float3 Ndc = LightClip.xyz / LightClip.w;
-    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
-    const float2 AtlasUV = UV * DirectionalShadowInfo.AtlasScale + DirectionalShadowInfo.AtlasOffet;
+    // 앞쪽 Cascade부터 검색
+    for (uint i = 0; i < Range.Count; ++i)
+    {
+        const FShadowInfo Info = ShadowInfos[Range.Offset + i];
+        float2 UV; float Depth;
 
-    // any() : 벡터 성분 중 하나라도 참이면 true
-    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f)
-        return 1.0f; // Shadow Map 밖이면 빛을 받는 것으로 간주
+        // 1) 밖이면 다음 Cascade 검사
+        if (!ProjectToShadowMap(WorldPos, Info.LightViewProjection, UV, Depth))
+            continue;
+        
+        // 그림자면 0 빛이면 1
+        const float Shadow = SampleShadowTile(Info, UV, Depth);
 
-    uint Width, Height;
+        // 현재 위치에서 가장자리 위치까지 거리
+        const float EdgeDist = min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y));
 
-    ShadowMapAtlas.GetDimensions(Width, Height); // 텍스처 크기(텍셀 개수) 돌려주는 함수
-    const uint2 Texel = min(uint2(AtlasUV * float2(Width, Height)), uint2(Width - 1, Height - 1)); // UV = 1.0 이면 텍셀 밖이므로 clamp
-    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
-    return (Ndc.z - DirectionalShadowInfo.DepthBias > MapDepth) ? 0.0f : 1.0f;
+        // 2) 충분히 UV 안쪽이거나 다음 Cascade가 없으면 그대로 반환
+        if (EdgeDist >= Range.BlendWidth || i + 1 >= Range.Count)
+            return Shadow;
+
+        // 3) Blend 하기 위해 다음 Cascade 구하기
+        const FShadowInfo NextInfo = ShadowInfos[Range.Offset + i + 1];
+        float2 NextUV; float NextDepth;
+        if (!ProjectToShadowMap(WorldPos, NextInfo.LightViewProjection, NextUV, NextDepth))
+            return Shadow;      // 혹시라도 이 점을 표현하지 않으면 그대로 반환
+        
+        // lerp(A, B, t) : t가 0 이면 A, 1이면 B
+        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth), Shadow, EdgeDist / Range.BlendWidth);
+    }
+
+    // 모든 Cascade 밖이면 
+    return 1.0;
 }
 
 // Directional Light의 영향을 구한다
@@ -480,6 +539,20 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 #elif LIGHTING_MODEL_GOURAUD
     DiffuseLighting += Input.VertexDiffuse;
 #endif
+
+    // Cascade 디버그
+    if (LightShadowRanges[0].bDebugCascades != 0)
+    {
+        static const float3 CascadeColors[5] = {
+            // 연한 빨강, 연한 초록, 연학 파랑, 연한 노랑, 흰색 (Cascade 없는 곳은 원래 색)
+            float3(1.0f, 0.3f, 0.3f), float3(0.3f, 1.0f, 0.3f), float3(0.3f, 0.3f, 1.0f), float3(1.0f, 1.0f, 0.3f), float3(1.0f, 1.0f, 1.0f)
+        };
+        // 틴트 추가
+        const uint Index = FindCascadeIndex(Input.WorldPos);
+        // 모든 Cascade 밖(Index == Count)이면 Cascade 수와 상관없이 흰색
+        const float3 Tint = (Index >= LightShadowRanges[0].Count) ? float3(1.0f, 1.0f, 1.0f) : CascadeColors[Index];
+        Albedo.rgb *= Tint;
+    }
 
     return float4(Albedo.rgb * DiffuseLighting + SpecularLighting, Alpha);
 #endif

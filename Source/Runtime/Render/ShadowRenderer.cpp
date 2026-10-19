@@ -85,6 +85,8 @@ void FShadowRenderer::SetParameters(
 
 		FLightShadowRange Range{
 			.Offset = static_cast<uint32>(ShadowInfos.Num()),
+			.BlendWidth = Light.BlendWidth,
+			.bDebugCascades = Light.bDebugCascades,
 		};
 
 		const float DepthBias = Light.DepthBias;
