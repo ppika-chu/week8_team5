@@ -204,8 +204,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
 
 			// Todo : Cascade 구간 분할 루프. 지금은 1장
+			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			Directional.Maps.Add(FShadowData{
-				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, ShadowRenderer->GetTileSize()),
+				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, Resolution),
 			});
 
 			Lights.Add(Directional);
