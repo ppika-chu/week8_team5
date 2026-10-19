@@ -7,6 +7,10 @@
 
 constexpr uint32 MaxShadowInfos = 64;
 
+constexpr uint32 MinShadowAtlasSize = 1024;
+constexpr uint32 MaxShadowAtlasSize = 16384;
+
+
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
 	if (!InRenderer)
@@ -34,7 +38,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	if (!ShadowAtlas.Init(16384))
+	if (!ShadowAtlas.EnsureTextureSize(MinShadowAtlasSize))
 	{
 		return false;
 	}
@@ -48,18 +52,35 @@ void FShadowRenderer::SetParameters(
 	TArray<FLightShadowData>&& Lights,
 	uint32 LightSlotCount)
 {
-	ShadowAtlas.ResetAllocations();
-
 	ShadowInfos.Reset(MaxShadowInfos);
 	ShadowAllocations.Reset(MaxShadowInfos);
-	LightShadowRanges.Reset(LightSlotCount);
 
-	const uint32 SlotCount = LightSlotCount > 0 ? LightSlotCount : 1;
+	const uint32 MaxLightSlots =
+		MaxDirectionalLights + MaxLocalLights;
+
+	const uint32 SlotCount = FMath::Clamp(LightSlotCount, 1u, MaxLightSlots);
+
+	LightShadowRanges.Reset(SlotCount);
 
 	// Ensure SlotCount <= size of range buffer
 	for (uint32 i = 0; i < SlotCount; ++i)
 	{
 		LightShadowRanges.Add(FLightShadowRange{});
+	}
+
+	// Validate resolution scale and clamp to [0.1, 1.0]
+	for (FLightShadowData& Light : Lights)
+	{
+		if (!std::isfinite(Light.ResolutionScale) ||
+			Light.ResolutionScale <= 0.0f)
+		{
+			Light.ResolutionScale = 0.0f;
+			continue;
+		}
+
+
+		Light.ResolutionScale =
+			FMath::Clamp(Light.ResolutionScale, 0.1f, 1.0f);
 	}
 
 	// Sort lights by resolution scale (descending) to allocate larger shadow maps first
@@ -69,20 +90,80 @@ void FShadowRenderer::SetParameters(
 			return A.ResolutionScale > B.ResolutionScale;
 		});
 
-	for (const FLightShadowData& Light : Lights)
+	struct FShadowRequest
 	{
-		if (Light.LightSlotIndex >= SlotCount)
-			continue;
+		uint32 LightIndex;
+		uint32 MapIndex;
+	};
 
-		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
+	TArray<FShadowRequest> Requests;
+	TArray<uint32> Resolutions;
 
-		// Skip if no shadow maps or shadow info buffer
-		if (MapCount == 0 ||
-			static_cast<uint32>(ShadowInfos.Num()) + MapCount > MaxShadowInfos)
+	TArray<uint32> AcceptedSlots;
+	AcceptedSlots.Reset(SlotCount);
+
+	for (uint32 i = 0; i < SlotCount; ++i)
+	{
+		AcceptedSlots.Add(0);
+	}
+
+	// 1. Confirm the shadow request
+	for (uint32 LightIndex = 0;
+		LightIndex < static_cast<uint32>(Lights.Num());
+		++LightIndex)
+	{
+		const FLightShadowData& Light = Lights[LightIndex];
+
+		if (Light.LightSlotIndex >= SlotCount ||
+			Light.ResolutionScale <= 0.0f ||
+			AcceptedSlots[Light.LightSlotIndex] != 0) // Check if the slot is already accepted
 		{
 			continue;
 		}
 
+		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
+		const uint32 RequestCount = static_cast<uint32>(Requests.Num());
+
+		if (MapCount == 0 ||
+			MapCount > MaxShadowInfos - RequestCount)
+		{
+			continue;
+		}
+
+		const uint32 Resolution = static_cast<uint32>(
+			Light.ResolutionScale * DefaultShadowResolution);
+
+		if (Resolution == 0)
+		{
+			continue;
+		}
+
+		AcceptedSlots[Light.LightSlotIndex] = 1;
+
+		for (uint32 MapIndex = 0;
+			MapIndex < MapCount;
+			++MapIndex)
+		{
+			Requests.Add(FShadowRequest{
+				.LightIndex = LightIndex,
+				.MapIndex = MapIndex
+				});
+
+			Resolutions.Add(Resolution);
+		}
+	}
+
+	// 2. Try to pack the shadow maps into the atlas
+	TArray<FShadowAtlasAllocation> PackedAllocations;
+	bool bReady = false;
+
+	if (Requests.Num() > 0)
+	{
+		uint32 CandidateSize = FMath::Max(
+			ShadowAtlas.GetSize(),
+			MinShadowAtlasSize);
+
+		while (CandidateSize <= MaxShadowAtlasSize)
 		FLightShadowRange Range{
 			.Offset = static_cast<uint32>(ShadowInfos.Num()),
 			.BlendWidth = Light.BlendWidth,
@@ -93,17 +174,52 @@ void FShadowRenderer::SetParameters(
 		const uint32 Resolution = static_cast<uint32>(Light.ResolutionScale * DefaultShadowResolution);
 		for (const FShadowData& Data : Light.Maps)
 		{
-			FShadowAtlasAllocation Allocation{};
-			if (!ShadowAtlas.Allocate(Resolution, &Allocation))
+			if (FShadowAtlas::TryPack(
+				Resolutions,
+				CandidateSize,
+				&PackedAllocations))
+			{
+				bReady = ShadowAtlas.EnsureTextureSize(CandidateSize);
+				break;
+			}
+
+			// Prevent overflow and unnecessary iterations
+			if (CandidateSize > MaxShadowAtlasSize / 2)
 			{
 				break;
 			}
 
-			const float InvAtlasSize =
-				1.0f
-				/ static_cast<float>(ShadowAtlas.GetSize());
+			CandidateSize *= 2;
 
-			FShadowInfo ShadowInfo{
+		}
+	}
+
+	// 3. Update GPU data based on the packing results
+	if (bReady)
+	{
+		const float InvAtlasSize =
+			1.0f / static_cast<float>(ShadowAtlas.GetSize());
+
+		for (uint32 RequestIndex = 0;
+			RequestIndex < static_cast<uint32>(Requests.Num());
+			++RequestIndex)
+		{
+			const FShadowRequest& Request = Requests[RequestIndex];
+			const FLightShadowData& Light = Lights[Request.LightIndex];
+			const FShadowData& Data = Light.Maps[Request.MapIndex];
+			const FShadowAtlasAllocation& Allocation =
+				PackedAllocations[RequestIndex];
+
+			FLightShadowRange& Range =
+				LightShadowRanges[Light.LightSlotIndex];
+
+			if (Range.Count == 0)
+			{
+				Range.Offset =
+					static_cast<uint32>(ShadowInfos.Num());
+			}
+
+			ShadowInfos.Add(FShadowInfo{
 				.LightViewProj = Data.LightViewProj,
 				.AtlasOffset = {
 					Allocation.X * InvAtlasSize,
@@ -113,24 +229,25 @@ void FShadowRenderer::SetParameters(
 					Allocation.Width * InvAtlasSize,
 					Allocation.Height * InvAtlasSize
 				},
-				.DepthBias = DepthBias
-			};
+				.DepthBias = Light.DepthBias
+				});
 
-			ShadowInfos.Add(ShadowInfo);
 			ShadowAllocations.Add(Allocation);
-		};
-
-		Range.Count = static_cast<uint32>(
-			ShadowInfos.Num() - Range.Offset);
-
-		LightShadowRanges[Light.LightSlotIndex] = Range;
+			++Range.Count;
+		}
 	}
 
-	RenderCommand::UpdateBufferData(
-		ShadowInfosBuffer.get(),
-		ShadowInfos.GetData(),
-		static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
+	// If packing failed, ShadowInfos is empty, and Range.Count remains 0 for all lights.
+	if (ShadowInfos.Num() > 0)
+	{
+		RenderCommand::UpdateBufferData(
+			ShadowInfosBuffer.get(),
+			ShadowInfos.GetData(),
+			static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
+	}
 
+	// Upload Count = 0 even if there is no request,
+	// so that the last frame's shadow data is not used in the next frame.
 	RenderCommand::UpdateBufferData(
 		LightShadowRangesBuffer.get(),
 		LightShadowRanges.GetData(),
