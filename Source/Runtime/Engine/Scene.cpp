@@ -178,7 +178,7 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, float ShadowDistance)
+void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, const FShadowSettings& Shadow)
 {
 	if (!Renderer || !ShadowRenderer) return;
 	
@@ -218,24 +218,32 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			ExtractDepthRange(CameraProj, CamNear, CamFar, bOrtho);
 			
 			// Shadow Distance 만큼 자르기
-			const float SliceFar = FMath::Min(CamFar, CamNear + ShadowDistance);
+			const float SliceFar = FMath::Min(CamFar, CamNear + Shadow.Distance);
 
 			// 카메라 조각 꼭짓점 8개
-			FVector Near[4], Far[4], Corners[8];
+			FVector Near[4], Far[4];
 			GetFrustumPlaneCorners(CameraViewProj, Near, Far);
-			GetSliceCorners(Near, Far, CamNear, CamFar, CamNear, SliceFar, Corners);
-
+			
+			const uint32 Count = FMath::Clamp(Shadow.NumCascades, 1u, MaxCascades);
+			float Splits[MaxCascades + 1];
+			ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
+			
 			FLightShadowData Directional{};
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
 			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
-
-			// Todo : Cascade 구간 분할 루프. 지금은 1장
+			Directional.BlendWidth = Shadow.BlendWidth;
+			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;
 			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
-			Directional.Maps.Add(FShadowData{
-				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, Resolution),
-			});
-
+			
+			for (uint32 i = 0; i < Count; ++i)
+			{
+				FVector Corners[8];
+				GetSliceCorners(Near, Far, CamNear, CamFar, Splits[i], Splits[i+1], Corners);
+				Directional.Maps.Add(FShadowData{
+					.LightViewProj = FitCascade(Corners, Forward, Right, Up, Resolution),
+				});
+			}
 			Lights.Add(Directional);
 		}
 	}

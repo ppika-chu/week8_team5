@@ -17,7 +17,6 @@
 #include "Render/DepthViewRenderer.h"
 #include "Render/ShadowRenderer.h"
 
-
 #include "Editor/EditorUI/EditorUI.h"
 #include "Editor/OutputLog/OutputLogPanel.h"
 #include "Editor/Details/DetailsPanel.h"

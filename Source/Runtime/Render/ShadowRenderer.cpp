@@ -208,6 +208,9 @@ void FShadowRenderer::SetParameters(
 			{
 				Range.Offset =
 					static_cast<uint32>(ShadowInfos.Num());
+
+				Range.BlendWidth = Light.BlendWidth;
+				Range.bDebugCascades = Light.bDebugCascades;
 			}
 
 			ShadowInfos.Add(FShadowInfo{

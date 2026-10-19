@@ -50,6 +50,11 @@ void FSettingsPanel::OnRender()
 	ImGui::Combo("Light Culling", &Settings.LightCullingMode, "Tiled\0Clustered\0Tiled 2.5D\0");
 	const char* Models[] = { "Gouraud", "Lambert", "Blinn-Phong" };
 	ImGui::Combo("Lighting Model", &Settings.LightingModel, Models, IM_ARRAYSIZE(Models));
+	ImGui::SliderInt("Cascades", &Settings.NumCascades, 1, 4);
+	ImGui::SliderFloat("Shadow Distance", &Settings.ShadowDistance, 5.0f, 500.0f, "%.0f");
+	ImGui::SliderFloat("Cascade Split", &Settings.CascadeSplitLambda, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat("Cascade Blend", &Settings.CascadeBlendWidth, 0.0f, 0.3f, "%.2f");
+	ImGui::Checkbox ("Debug Cascades", &Settings.bDebugCascades);
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));

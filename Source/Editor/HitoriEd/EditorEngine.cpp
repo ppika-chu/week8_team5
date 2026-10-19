@@ -43,9 +43,6 @@ namespace
 
 #include "Core/SplashScreen.h"
 
-// Todo: SettingsPanel로 옮겨 에디터에서 조절할 수 있게
-constexpr float ShadowDistance = 50.0f;
-
 FEngineConfig UEditorEngine::GetConfig() const
 {
 	FEngineConfig Desc;
@@ -412,6 +409,17 @@ void UEditorEngine::RenderMultipleViewports()
 	UWorld* CapturedWorld = nullptr;
 	Renderer->SetLightDebugMode(SettingsPanel->GetSettings().LightDebugMode);
 	Renderer->SetLightCullingMode(static_cast<ELightCullingMode>(SettingsPanel->GetSettings().LightCullingMode));
+
+	// 런타임 그림자 설정. 한 프레임 동안 같은 값을 쓴다.
+	const FEditorSettings& EditorSettings = SettingsPanel->GetSettings();
+	const FShadowSettings ShadowSettings{
+		.Distance       = EditorSettings.ShadowDistance,
+		.NumCascades    = static_cast<uint32>(EditorSettings.NumCascades),
+		.SplitLambda    = EditorSettings.CascadeSplitLambda,
+		.BlendWidth     = EditorSettings.CascadeBlendWidth,
+		.bDebugCascades = EditorSettings.bDebugCascades,
+	};
+
 	for (int32 ViewIndex = 0; ViewIndex < 4; ++ViewIndex)
 	{
 		const bool bActive = MultipleViewportsAdapter.IsViewActive(ViewIndex);
@@ -433,7 +441,7 @@ void UEditorEngine::RenderMultipleViewports()
 		ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get(),
 										   MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
 										   MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
-										   ShadowDistance);
+										   ShadowSettings);
 		RenderShadowPass();
 		{	
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
@@ -468,7 +476,7 @@ void UEditorEngine::RenderMultipleViewports()
 										   ShadowRenderer.get(),
 										   MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
 										   MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
-										   ShadowDistance);
+										   ShadowSettings);
 		RenderShadowPass();
 		
 		{
