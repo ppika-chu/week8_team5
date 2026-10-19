@@ -5,6 +5,8 @@
 #include "RenderCommand.h"
 #include "RenderingInfo.h"
 
+constexpr uint32 MaxShadowInfos = 64;
+
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
 	if (!InRenderer)
@@ -14,49 +16,116 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	Renderer = InRenderer;
 
-	ShadowCB = RenderCommand::CreateConstantBuffer(
-		sizeof(FShadowConstants));
+	ShadowInfosBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FShadowInfo),
+		MaxShadowInfos);
 
-	if (!ShadowCB || !ShadowCB->GetBuffer())
+	if (!ShadowInfosBuffer || !ShadowInfosBuffer->GetSRV())
 	{
 		return false;
 	}
 
-	D3D11_TEXTURE2D_DESC Desc{
-		.Width = 2048,
-		.Height = 2048,
-		.MipLevels = 1,
-		.ArraySize = 1,
-		.Format = DXGI_FORMAT_R24G8_TYPELESS,
-		.SampleDesc = {
-			.Count = 1,
-			.Quality = 0
-		},
-		.Usage = D3D11_USAGE_DEFAULT,
-		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
-	};
+	LightShadowRangesBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FLightShadowRange),
+		MaxDirectionalLights + MaxLocalLights);
 
-	ShadowMap = RenderCommand::CreateTexture2D(Desc);
-	
-	if (!ShadowMap ||
-		!ShadowMap->GetDSV() ||
-		!ShadowMap->GetSRV())
+	if (!LightShadowRangesBuffer || !LightShadowRangesBuffer->GetSRV())
 	{
 		return false;
 	}
 
-	SetParameters(FShadowConstants{});
+	if (!ShadowAtlas.Init(16384, 2048))
+	{
+		return false;
+	}
+
+	SetParameters({}, 0);
 
 	return true;
 }
 
-void FShadowRenderer::SetParameters(const FShadowConstants& Parameters)
+void FShadowRenderer::SetParameters(
+	const TArray<FLightShadowData>& Lights,
+	uint32 LightSlotCount)
 {
-	ShadowData = Parameters;
+	ShadowAtlas.ResetAllocations();
+
+	ShadowInfos.Reset(MaxShadowInfos);
+	ShadowAllocations.Reset(MaxShadowInfos);
+	LightShadowRanges.Reset(LightSlotCount);
+
+	const uint32 SlotCount = LightSlotCount > 0 ? LightSlotCount : 1;
+
+	// Ensure SlotCount <= size of range buffer
+	for (uint32 i = 0; i < SlotCount; ++i)
+	{
+		LightShadowRanges.Add(FLightShadowRange{});
+	}
+
+	for (const FLightShadowData& Light : Lights)
+	{
+		if (Light.LightSlotIndex >= SlotCount)
+			continue;
+
+		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
+
+		// Skip if no shadow maps or not enough space in the atlas or shadow info buffer
+		if (MapCount == 0 ||
+			MapCount > ShadowAtlas.GetRemainingTileCount() ||
+			static_cast<uint32>(ShadowInfos.Num()) + MapCount > MaxShadowInfos)
+		{
+			continue;
+		}
+
+		FLightShadowRange Range{
+			.Offset = static_cast<uint32>(ShadowInfos.Num()),
+		};
+
+		const float DepthBias = Light.DepthBias;
+		for (const FShadowData& Data : Light.Maps)
+		{
+			FShadowAtlasAllocation Allocation{};
+			if (!ShadowAtlas.Allocate(&Allocation))
+			{
+				break;
+			}
+
+			const float InvAtlasSize =
+				1.0f
+				/ static_cast<float>(ShadowAtlas.GetSize());
+
+			FShadowInfo ShadowInfo{
+				.LightViewProj = Data.LightViewProj,
+				.AtlasOffset = {
+					Allocation.X * InvAtlasSize,
+					Allocation.Y * InvAtlasSize
+				},
+				.AtlasScale = {
+					Allocation.Width * InvAtlasSize,
+					Allocation.Height * InvAtlasSize
+				},
+				.DepthBias = DepthBias
+			};
+
+			ShadowInfos.Add(ShadowInfo);
+			ShadowAllocations.Add(Allocation);
+		};
+
+		Range.Count = static_cast<uint32>(
+			ShadowInfos.Num() - Range.Offset);
+
+		LightShadowRanges[Light.LightSlotIndex] = Range;
+	}
+
 	RenderCommand::UpdateBufferData(
-		ShadowCB.get(), 
-		&Parameters, 
-		sizeof(FShadowConstants));
+		ShadowInfosBuffer.get(),
+		ShadowInfos.GetData(),
+		static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
+
+	RenderCommand::UpdateBufferData(
+		LightShadowRangesBuffer.get(),
+		LightShadowRanges.GetData(),
+		static_cast<uint32>(LightShadowRanges.size() * sizeof(FLightShadowRange)));
 }
 
 void FShadowRenderer::BindForLighting() const
@@ -65,49 +134,67 @@ void FShadowRenderer::BindForLighting() const
 		EShaderBindFlagBits::Vertex |
 		EShaderBindFlagBits::Pixel;
 
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
-	RenderCommand::BindShaderResource(13, ShadowMap.get(), Stages);
+	//RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
+	RenderCommand::BindShaderResource(13, ShadowAtlas.GetTexture(), Stages);
+	RenderCommand::BindShaderResource(14, ShadowInfosBuffer.get(), Stages);
+	RenderCommand::BindShaderResource(15, LightShadowRangesBuffer.get(), Stages);
 }
 
-void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue)
+void FShadowRenderer::BeginShadowPass()
 {
-	if (!IsShadowEnabled())
-	{
-		return;
-	}
+	constexpr auto Stages =
+		EShaderBindFlagBits::Vertex |
+		EShaderBindFlagBits::Pixel;
 
-	Renderer->RenderQueueSorting(
-		ShadowQueue,
-		ShadowData.LightViewProj);
+	RenderCommand::UnbindShaderResource(13, Stages);
 
-	FRenderingInfo ShadowInfo{
+	FRenderingInfo Pass{
 		.ViewportSetting = {
-			.Width = ShadowMap->GetWidth(),
-			.Height = ShadowMap->GetHeight()
+			.Width = ShadowAtlas.GetSize(),
+			.Height = ShadowAtlas.GetSize(),
 		},
 		.DepthStencil = {
-			.Texture = ShadowMap.get(),
+			.Texture = ShadowAtlas.GetTexture(),
 			.LoadOp = ERenderTargetLoadOp::Clear
 		}
 	};
 
-	RenderCommand::UnbindShaderResource(
-		13,
-		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-	
-	RenderCommand::BeginRenderPass(ShadowInfo);
+	RenderCommand::BeginRenderPass(Pass);
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::ShadowDepth);
-
 	RenderCommand::SetPrimitiveTopology(
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	
+}
+
+void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
+{
+	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	const FShadowAtlasAllocation& Tile =
+		ShadowAllocations[ShadowInfoIndex];
+
+	RenderCommand::SetViewport(
+		Tile.X, Tile.Y, Tile.Width, Tile.Height
+	);
+
+	Renderer->RenderQueueSorting(
+		ShadowQueue,
+		ShadowInfo.LightViewProj);
+
 	Renderer->RenderPreparedDepth(
-		ShadowData.LightViewProj, true);
+		ShadowInfo.LightViewProj, true);
+}
+
+void FShadowRenderer::EndShadowPass()
+{
+	FRenderingInfo Pass{
+		.DepthStencil = {
+			.Texture = ShadowAtlas.GetTexture()
+		}
+	};
+
+	RenderCommand::EndRenderPass(Pass);
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::SolidBack);
-
-	RenderCommand::EndRenderPass(ShadowInfo);
 }

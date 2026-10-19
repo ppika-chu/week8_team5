@@ -37,6 +37,7 @@ struct alignas(16) FViewConstants
 };
 static_assert(sizeof(FViewConstants) == 80, "UberLit.hlsl cbuffer ViewConstants 크기와 맞아야 한다");
 
+constexpr uint32 MaxDirectionalLights = 1;
 constexpr uint32 MaxLocalLights = 1024;
 
 // 컬링 방식별 셀 크기. Tiled는 슬라이스 1개인 Clustered와 같다.
