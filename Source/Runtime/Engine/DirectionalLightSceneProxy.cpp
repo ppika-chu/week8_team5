@@ -16,12 +16,11 @@ void FDirectionalLightSceneProxy::GetLightShaderParameters(FLightRenderParameter
 	Out.Intensity = Dir->GetIntensity();
 }
 
-FMatrix FDirectionalLightSceneProxy::GetShadowViewProjection(FVector Center, float Depth, float Size) const
+// Light VP는 ShadowRenderer에서 만들기 (카메라를 아는 곳에서)
+void FDirectionalLightSceneProxy::GetShadowBasis(FVector& OutForward, FVector& OutRight, FVector& OutUp) const
 {
 	const UDirectionalLightComponent* Dir = static_cast<const UDirectionalLightComponent*>(LightComponent);
-
-	// Light View 행렬
-	FMatrix LightView;
+	
 	FTransform Transform;
 	Transform.Rotation = Dir->GetWorldRotation();
 	

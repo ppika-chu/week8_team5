@@ -122,7 +122,7 @@ private:
 	//Icon Pass
 	void RenderIconPass(int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderIconQueue, FRenderQueue& ArrowQueue);
 	//Shadow Pass
-	void RenderShadowPass();
+	void RenderShadowPass();	// 전체 light render pass
 
 	FWorldContext& GetEditorWorldContext();
 	FWorldContext* GetPIEWorldContext(int32 WorldPIEInstance = 0);

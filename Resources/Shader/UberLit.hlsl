@@ -135,6 +135,7 @@ struct FLightShadowRange
 {
     uint Offset;
     uint Count;
+    uint2 Padding;
 };
 
 Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이

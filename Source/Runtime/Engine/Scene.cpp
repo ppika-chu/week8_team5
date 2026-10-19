@@ -7,6 +7,7 @@
 #include "Components/RectLightComponent.h"
 #include "Math/BVH.h"
 #include "PointLightSceneProxy.h"
+#include "Render/ShadowCascade.h"
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
@@ -151,16 +152,9 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
+void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, float ShadowDistance)
 {
 	if (!Renderer || !ShadowRenderer) return;
-
-	// Shadow 계산하기 위한 인자값들
-	FBox Bounds = BVH.GetRootBounds();
-	FVector Center = (Bounds.Max + Bounds.Min) * 0.5f;
-	float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
-	float Depth = 2 * Radius;	// 빛 방향 (Forward)
-	float Size = 2 * Radius;	// 빛에 수직인 방향 (Right, Up)
 	
 	FLightingConstants Constants{};
 	Constants.Ambient.Color = FVector(1, 1, 1);
@@ -175,35 +169,50 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		break;
 	}
 	
-	//FShadowConstants Shadow{};		// bShadowEnabled = 0
 	TArray<FLightShadowData> Lights;
-	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
 	{
-		if (!Proxy->IsVisible()) continue;
-		
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
 		Constants.Directional.Direction = P.Direction;
 		Constants.Directional.Color = P.Color;
 		Constants.Directional.Intensity = P.Intensity;
 
-		// 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
-		if (Size > 0.0f)		
+		// 씬 전체를 감싸는 Ortho 박스. 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
+		const FBox& Bounds = GetBounds();
+		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
+		if (Radius > 0.0f)
 		{
-			FShadowData ShadowData{
-				.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size),
-			};
+			FVector Forward, Right, Up;
+			Proxy->GetShadowBasis(Forward,Right, Up);
+
+			// Camera near/far
+			float CamNear, CamFar;
+			bool bOrtho;
+			ExtractDepthRange(CameraProj, CamNear, CamFar, bOrtho);
+			
+			// Shadow Distance 만큼 자르기
+			const float SliceFar = FMath::Min(CamFar, CamNear + ShadowDistance);
+
+			// 카메라 조각 꼭짓점 8개
+			FVector Near[4], Far[4], Corners[8];
+			GetFrustumPlaneCorners(CameraViewProj, Near, Far);
+			GetSliceCorners(Near, Far, CamNear, CamFar, CamNear, SliceFar, Corners);
 
 			FLightShadowData Directional{};
 			Directional.LightSlotIndex = 0;
-			Directional.Maps.Add(ShadowData);
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
+
+			// Todo : Cascade 구간 분할 루프. 지금은 1장
+			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
+			Directional.Maps.Add(FShadowData{
+				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, Resolution),
+			});
 
 			Lights.Add(Directional);
 		}
-		break;                                            // 셰이더는 하나만 받음
 	}
-	// Light 없으면 bShadowEnabled = 0
 
 	for (FLocalLightSceneProxy* LightProxy : LocalLightProxies)
 	{
@@ -267,8 +276,18 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
-	ShadowRenderer->SetParameters(Lights, MaxDirectionalLights + MaxLocalLights);
+	ShadowRenderer->SetParameters(std::move(Lights), MaxDirectionalLights + MaxLocalLights);
 }
+
+const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const
+{
+	for (const FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	{
+		if (Proxy->IsVisible())	return Proxy;
+	}
+	return nullptr;
+}
+
 
 void FScene::AddFogInfo(uint32 Id, const FFogInfo& FogInfo)
 {

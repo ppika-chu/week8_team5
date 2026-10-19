@@ -2,6 +2,8 @@
 
 #include "Texture2D.h"
 
+constexpr uint32 DefaultShadowResolution = 4096;
+
 struct FShadowAtlasAllocation
 {
 	uint32 X = 0;
@@ -12,25 +14,30 @@ struct FShadowAtlasAllocation
 
 class FShadowAtlas
 {
+private:
+	struct FShelf
+	{
+		uint32 Y = 0;		// The Y coordinate of the shelf in the atlas
+		uint32 Height = 0;	// The height of the shelf
+		uint32 NextX = 0;	// The next X coordinate to place a tile in the shelf
+	};
+
 public:
-	bool Init(uint32 InAtlasSize, uint32 InTileSize);
+	bool Init(uint32 InAtlasSize);
 
-	void ResetAllocations() { NextTile = 0; }
+	void ResetAllocations();
 
-	bool Allocate(FShadowAtlasAllocation* OutAllocation);
+	bool Allocate(uint32 Resolution, FShadowAtlasAllocation* OutAllocation);
 
 	FTexture2D* GetTexture() const { return Texture.get(); }
 	uint32 GetSize() const { return AtlasSize; }
-	uint32 GetRemainingTileCount() const
-	{
-		return TilesPerRow * TilesPerRow - NextTile;
-	}
 
 private:
 	TUniquePtr<FTexture2D> Texture{};
 
 	uint32 AtlasSize = 0;
-	uint32 TileSize = 0;
-	uint32 TilesPerRow = 0;
-	uint32 NextTile = 0;
+	uint32 UsedHeight = 0;	// Total height used by shelves
+	TArray<FShelf> Shelves{};
+
+	uint32 LastResolution = DefaultShadowResolution;
 };
