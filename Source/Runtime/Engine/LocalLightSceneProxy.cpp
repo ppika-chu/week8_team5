@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "LocalLightSceneProxy.h"
 
+/*
 FMatrix FLocalLightSceneProxy::GetShadowViewProjection(
 	float VerticalFovDegrees, 
 	float NearZ, 
@@ -32,6 +33,39 @@ FMatrix FLocalLightSceneProxy::GetShadowViewProjection(
 	const float ZOffset = -NearZ * FarZ / (FarZ - NearZ);
 
 	// 엔진 좌표계: X가 Forward
+	const FMatrix LightProjection(
+		0.0f, 0.0f, ZScale, 1.0f,
+		XScale, 0.0f, 0.0f, 0.0f,
+		0.0f, YScale, 0.0f, 0.0f,
+		0.0f, 0.0f, ZOffset, 0.0f
+	);
+
+	return LightView * LightProjection;
+}
+*/
+
+FMatrix FLocalLightSceneProxy::GetShadowViewProjection(const FVector& ViewDirection, const FVector& UpHint, float VerticalFovDegrees, float NearZ, float FarZ) const
+{
+	const FVector Forward = ViewDirection.GetSafeNormal();
+	const FVector Right = UpHint.Cross(Forward).GetSafeNormal();
+	// Todo: 다시 구하는 이유 알기
+	const FVector Up = Forward.Cross(Right);
+	const FVector Eye = LightComponent->GetWorldLocation();
+
+	const FMatrix LightView(
+		Forward.X, Right.X, Up.X, 0.0f,
+		Forward.Y, Right.Y, Up.Y, 0.0f,
+		Forward.Z, Right.Z, Up.Z, 0.0f,
+		-Forward.Dot(Eye), -Right.Dot(Eye), -Up.Dot(Eye), 1.0f
+	);
+
+	const float HalfFov = FMath::DegreesToRadians(VerticalFovDegrees) * 0.5f;
+
+	const float YScale = 1.0f / tan(HalfFov);
+	const float XScale = YScale;
+	const float ZScale = FarZ / (FarZ - NearZ);
+	const float ZOffset = -NearZ * FarZ / (FarZ - NearZ);
+
 	const FMatrix LightProjection(
 		0.0f, 0.0f, ZScale, 1.0f,
 		XScale, 0.0f, 0.0f, 0.0f,
