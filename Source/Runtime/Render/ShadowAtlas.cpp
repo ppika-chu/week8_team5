@@ -2,16 +2,104 @@
 #include "ShadowAtlas.h"
 #include "RenderCommand.h"
 
-bool FShadowAtlas::Init(uint32 InAtlasSize)
+bool FShadowAtlas::TryPack(
+	const TArray<uint32>& Resolutions,
+	uint32 CandidateSize,
+	TArray<FShadowAtlasAllocation>* OutAllocations)
 {
-	if (InAtlasSize == 0)
+	assert(OutAllocations);
+
+	OutAllocations->Reset();
+
+	if (CandidateSize == 0)
 	{
 		return false;
 	}
 
+	TArray<FShelf> Shelves;
+	TArray<FShadowAtlasAllocation> Allocations;
+	Allocations.Reset(Resolutions.Num());
+
+	uint32 UsedHeight = 0;
+
+	for (uint32 Resolution : Resolutions)
+	{
+		if (Resolution == 0 || Resolution > CandidateSize)
+		{
+			return false;
+		}
+
+		bool bPlaced = false;
+
+		// First-fit shelf packing
+		// Select the first shelf that can fit the tile
+		for (FShelf& Shelf : Shelves)
+		{
+			if (Resolution > Shelf.Height ||
+				Resolution > CandidateSize - Shelf.NextX)
+			{
+				continue;
+			}
+
+			Allocations.Add(FShadowAtlasAllocation{
+				.X = Shelf.NextX,
+				.Y = Shelf.Y,
+				.Width = Resolution,
+				.Height = Resolution
+				});
+
+			Shelf.NextX += Resolution;
+			bPlaced = true;
+			break;
+		}
+
+		if (bPlaced)
+		{
+			continue;
+		}
+
+		// Create a new shelf if no existing shelf can fit the tile
+		if (Resolution > CandidateSize - UsedHeight)
+		{
+			// No more space in the atlas
+			return false;
+		}
+
+		Shelves.Add(FShelf{
+			.Y = UsedHeight,
+			.Height = Resolution,
+			.NextX = Resolution
+			});
+
+		Allocations.Add(FShadowAtlasAllocation{
+			.X = 0,
+			.Y = UsedHeight,
+			.Width = Resolution,
+			.Height = Resolution
+			});
+
+		UsedHeight += Resolution;
+	}
+
+	*OutAllocations = std::move(Allocations);
+	return true;
+}
+
+bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
+{
+	if (RequiredSize == 0)
+	{
+		return false;
+	}
+
+	if (Texture && AtlasSize >= RequiredSize)
+	{
+		return true;
+	}
+
 	D3D11_TEXTURE2D_DESC Desc{
-		.Width = InAtlasSize,
-		.Height = InAtlasSize,
+		.Width = RequiredSize,
+		.Height = RequiredSize,
 		.MipLevels = 1,
 		.ArraySize = 1,
 		.Format = DXGI_FORMAT_R24G8_TYPELESS,
@@ -20,75 +108,21 @@ bool FShadowAtlas::Init(uint32 InAtlasSize)
 		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
 	};
 
-	Texture = RenderCommand::CreateTexture2D(Desc);
+	auto NewTexture = RenderCommand::CreateTexture2D(Desc);
 
-	if (!Texture || !Texture->GetDSV() || !Texture->GetSRV())
+	if (!NewTexture || !NewTexture->GetDSV() || !NewTexture->GetSRV())
 	{
 		return false;
 	}
 
-	AtlasSize = InAtlasSize;
-	ResetAllocations();
-	return true;
-}
-
-void FShadowAtlas::ResetAllocations()
-{
-	Shelves.Reset();
-	UsedHeight = 0;
-	LastResolution = DefaultShadowResolution;
-}
-
-// Should be called in order of decreasing Resolution
-// Shelf packing algorithm (First-fit)
-bool FShadowAtlas::Allocate(uint32 Resolution, FShadowAtlasAllocation* OutAllocation)
-{
-	assert(OutAllocation);
-	assert(Resolution <= LastResolution);
-	LastResolution = Resolution;
-
-	assert(Resolution > 0 && Resolution <= AtlasSize);
-
-	// Select the first shelf that can fit the tile
-	for (FShelf& Shelf : Shelves)
+	if (Texture)
 	{
-		if (Resolution > Shelf.Height ||
-			Resolution > AtlasSize - Shelf.NextX)
-		{
-			continue;
-		}
-
-		*OutAllocation = {
-			.X = Shelf.NextX,
-			.Y = Shelf.Y,
-			.Width = Resolution,
-			.Height = Resolution
-		};
-
-		Shelf.NextX += Resolution;
-		return true;
+		RenderCommand::UnbindShaderResource(
+			12,
+			EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 	}
 
-	// Create a new shelf if no existing shelf can fit the tile
-	if (Resolution > AtlasSize - UsedHeight)
-	{
-		// No more space in the atlas
-		return false;
-	}
-
-	Shelves.Add(FShelf{
-		.Y = UsedHeight,
-		.Height = Resolution,
-		.NextX = Resolution
-	});
-
-	*OutAllocation = {
-		.X = 0,
-		.Y = UsedHeight,
-		.Width = Resolution,
-		.Height = Resolution
-	};
-
-	UsedHeight += Resolution;
+	Texture = std::move(NewTexture);
+	AtlasSize = RequiredSize;
 	return true;
 }
