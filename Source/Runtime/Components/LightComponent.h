@@ -8,7 +8,7 @@ class ULightComponent : public ULightComponentBase
 {
 	DECLARE_CLASS(ULightComponent, ULightComponentBase)
 	REFLECT_START(ULightComponent)
-		PROPERTY_META(ShadowResolutionScale, .DragSpeed = 0.01f, .Min = 0.1f, .Max = 4.0f, .Format = "%.2f")
+		PROPERTY_META(ShadowResolutionScale, .DragSpeed = 0.01f, .Min = 0.1f, .Max = 1.0f, .Format = "%.2f")
 		PROPERTY_META(ShadowBias, .DragSpeed = 0.0001f, .Min = 0.0f, .Max = 0.05f, .Format = "%.4f")
 		PROPERTY_META(ShadowSlopeBias, .DragSpeed = 0.0001f, .Min = 0.0f, .Max = 0.05f, .Format = "%.4f")
 		PROPERTY_META(ShadowSharpen, .DragSpeed = 0.0001f, .Min = 0.0f, .Max = 1.0f, .Format = "%.4f")
@@ -27,7 +27,7 @@ public:
 	FLightSceneProxy* SceneProxy = nullptr;
 
 	/* Shadow */
-	void SetShadowResolutionScale(float InScale) { ShadowResolutionScale = FMath::Max(0.1f, InScale); }
+	void SetShadowResolutionScale(float InScale) { ShadowResolutionScale = FMath::Clamp(InScale, 0.1f, 1.0f); }
 	float GetShadowResolutionScale() const { return ShadowResolutionScale; }
 	void SetShadowBias(float InBias) { ShadowBias = FMath::Max(0.0f, InBias); }
 	float GetShadowBias() const  { return ShadowBias; }

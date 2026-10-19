@@ -15,9 +15,9 @@ class FShadowAtlas
 public:
 	bool Init(uint32 InAtlasSize, uint32 InTileSize);
 
-	void ResetAllocations() { NextTile = 0; }
+	void ResetAllocations();
 
-	bool Allocate(FShadowAtlasAllocation* OutAllocation);
+	bool Allocate(float ResolutionScale, FShadowAtlasAllocation* OutAllocation);
 
 	FTexture2D* GetTexture() const { return Texture.get(); }
 	uint32 GetSize() const { return AtlasSize; }
@@ -34,4 +34,6 @@ private:
 	uint32 TileSize = 0;
 	uint32 TilesPerRow = 0;
 	uint32 NextTile = 0;
+
+	float LastResolutionScale = 1.0f;
 };

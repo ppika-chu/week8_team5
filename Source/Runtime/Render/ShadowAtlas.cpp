@@ -35,9 +35,18 @@ bool FShadowAtlas::Init(uint32 InAtlasSize, uint32 InTilesize)
 	return true;
 }
 
-bool FShadowAtlas::Allocate(FShadowAtlasAllocation* OutAllocation)
+void FShadowAtlas::ResetAllocations()
+{
+	NextTile = 0;
+	LastResolutionScale = 1.0f;
+}
+
+// Should be called in order of decreasing ResolutionScale
+bool FShadowAtlas::Allocate(float ResolutionScale, FShadowAtlasAllocation* OutAllocation)
 {
 	assert(OutAllocation);
+	assert(ResolutionScale <= LastResolutionScale);
+	LastResolutionScale = ResolutionScale;
 
 	if (TilesPerRow == 0 || NextTile >= TilesPerRow * TilesPerRow)
 	{
@@ -46,8 +55,8 @@ bool FShadowAtlas::Allocate(FShadowAtlasAllocation* OutAllocation)
 
 	OutAllocation->X = (NextTile % TilesPerRow) * TileSize;
 	OutAllocation->Y = (NextTile / TilesPerRow) * TileSize;
-	OutAllocation->Width = TileSize;
-	OutAllocation->Height = TileSize;
+	OutAllocation->Width = TileSize * ResolutionScale;
+	OutAllocation->Height = TileSize * ResolutionScale;
 
 	NextTile++;
 	return true;

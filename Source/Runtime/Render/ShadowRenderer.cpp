@@ -34,7 +34,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	if (!ShadowAtlas.Init(16384, 2048))
+	if (!ShadowAtlas.Init(16384, 4096))
 	{
 		return false;
 	}
@@ -45,7 +45,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 }
 
 void FShadowRenderer::SetParameters(
-	const TArray<FLightShadowData>& Lights,
+	TArray<FLightShadowData>&& Lights,
 	uint32 LightSlotCount)
 {
 	ShadowAtlas.ResetAllocations();
@@ -61,6 +61,13 @@ void FShadowRenderer::SetParameters(
 	{
 		LightShadowRanges.Add(FLightShadowRange{});
 	}
+
+	// Sort lights by resolution scale (descending) to allocate larger shadow maps first
+	std::sort(Lights.begin(), Lights.end(),
+		[](const FLightShadowData& A, const FLightShadowData& B)
+		{
+			return A.ResolutionScale > B.ResolutionScale;
+		});
 
 	for (const FLightShadowData& Light : Lights)
 	{
@@ -85,7 +92,7 @@ void FShadowRenderer::SetParameters(
 		for (const FShadowData& Data : Light.Maps)
 		{
 			FShadowAtlasAllocation Allocation{};
-			if (!ShadowAtlas.Allocate(&Allocation))
+			if (!ShadowAtlas.Allocate(Light.ResolutionScale, &Allocation))
 			{
 				break;
 			}
