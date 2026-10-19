@@ -21,6 +21,7 @@ public:
 
 	FTexture2D* GetTexture() const { return Texture.get(); }
 	uint32 GetSize() const { return AtlasSize; }
+	uint32 GetTilesize() const { return TileSize; }
 	uint32 GetRemainingTileCount() const
 	{
 		return TilesPerRow * TilesPerRow - NextTile;

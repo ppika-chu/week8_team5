@@ -38,7 +38,7 @@ public:
 	void RemoveLight(ULightComponent* Component);
 
 	void RemoveAllLights();
-	void UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer);
+	void UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, float ShadowDistance);
 
 	void AddFogInfo(uint32 Id, const FFogInfo& FogInfo);
 	void RemoveFogInfo(uint32 Id);
@@ -50,6 +50,9 @@ public:
 
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
+
+	const FDirectionalLightSceneProxy* GetMainDirectionalLight() const;
+	const FBox& GetBounds() const { return BVH.GetRootBounds(); }
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
