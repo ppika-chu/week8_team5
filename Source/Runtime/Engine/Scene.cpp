@@ -241,7 +241,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 				FVector Corners[8];
 				GetSliceCorners(Near, Far, CamNear, CamFar, Splits[i], Splits[i+1], Corners);
 				Directional.Maps.Add(FShadowData{
-					.LightViewProj = FitCascade(Corners, Forward, Right, Up, Resolution),
+					FitCascade(Corners, Forward, Right, Up, Resolution),
 				});
 			}
 			Lights.Add(Directional);

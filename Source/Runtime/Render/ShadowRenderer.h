@@ -10,6 +10,7 @@ class FRenderer;
 struct FShadowData
 {
 	FMatrix LightViewProj;
+	float Depth = 0.0f;
 };
 
 // Data delivered from FScene
@@ -33,7 +34,8 @@ struct alignas(16) FShadowInfo
 	FVector2 AtlasScale;
 
 	float DepthBias;
-	float Padding[3];
+	float Depth;
+	float Padding[2];
 };
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기

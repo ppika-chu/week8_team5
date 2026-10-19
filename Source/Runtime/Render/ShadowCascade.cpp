@@ -32,7 +32,7 @@ void GetSliceCorners(const FVector Near[4], const FVector Far[4], float CamNear,
 	}
 }
 
-FMatrix FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, uint32 TileSize)
+FShadowData FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, uint32 TileSize)
 {
 	// 감싸는 구 - 카메라가 회전해도 크기가 변하지 않음
     FVector Center(0.0f, 0.0f, 0.0f);
@@ -61,8 +61,11 @@ FMatrix FitCascade(const FVector Corners[8], const FVector& F, const FVector& R,
 	const FVector Eye = Center + F * TNear;
 	const float Depth = TFar - TNear;           // 카메라가 움직여도 
 
-	// Light View * LIght Projection
-	return FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth);
+	// Light View * LIght Projection + Depth 전달
+	return FShadowData{
+		.LightViewProj = FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth),
+		.Depth = Depth,
+	};
 }
 
 void ComputeCascadeSplits(float Near, float Far, uint32 Count, float Lambda, float OutSplits[MaxCascades + 1])
