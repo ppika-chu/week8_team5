@@ -127,9 +127,10 @@ struct FShadowInfo
     matrix LightViewProjection;
     float2 AtlasOffet;
     float2 AtlasScale;
-    float DepthBias;
+    float Depth;
     float PrescaledTangentTheta;
-    float2 Padding;
+    float TexelCountX; // Texelcount X of Atlas
+    float TexelCountY; // Texelcount Y of Atlas
 };
 
 struct FLightShadowRange
@@ -143,6 +144,7 @@ Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
 StructuredBuffer<FShadowInfo> ShadowInfos : register(t14);
 StructuredBuffer<FLightShadowRange> LightShadowRanges : register(t15);
 SamplerState PointSampler : register(s1);
+SamplerComparisonState LinearCmpSampler : register(s2);
 
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
@@ -151,40 +153,41 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 #define CASTER_SEARCH_COUNT 16
 #define CASTER_SAMPLE_COUNT 32
-const float2 PoissonDisk[32] = (
+const float2 PoissonDisk[32] =
+{
     float2(-0.94201624, -0.39906216),
-    float2( 0.94558609, -0.76890725),
+    float2(0.94558609, -0.76890725),
     float2(-0.09418410, -0.92938870),
-    float2( 0.34495938,  0.29387760),
-    float2(-0.91588581,  0.45771432),
+    float2(0.34495938, 0.29387760),
+    float2(-0.91588581, 0.45771432),
     float2(-0.36885672, -0.59391560),
-    float2(-0.21444538,  0.58169124),
-    float2( 0.21396971,  0.71632737),
-    float2( 0.14517782, -0.89163759),
-    float2( 0.77199182, -0.54098940),
-    float2( 0.74344331,  0.47479805),
+    float2(-0.21444538, 0.58169124),
+    float2(0.21396971, 0.71632737),
+    float2(0.14517782, -0.89163759),
+    float2(0.77199182, -0.54098940),
+    float2(0.74344331, 0.47479805),
     float2(-0.52329040, -0.40813896),
     float2(-0.54061840, -0.84076041),
-    float2( 0.11587961, -0.47395784),
-    float2( 0.73387539,  0.13610810),
-    float2(-0.16568006,  0.28951076),
-    float2( 0.29347372, -0.25450444),
-    float2(-0.47137415,  0.84261900),
-    float2( 0.04688114,  0.11199968),
-    float2(-0.64670003,  0.41320398),
+    float2(0.11587961, -0.47395784),
+    float2(0.73387539, 0.13610810),
+    float2(-0.16568006, 0.28951076),
+    float2(0.29347372, -0.25450444),
+    float2(-0.47137415, 0.84261900),
+    float2(0.04688114, 0.11199968),
+    float2(-0.64670003, 0.41320398),
     float2(-0.01723472, -0.14091361),
-    float2( 0.47144005, -0.64096510),
-    float2( 0.46977828,  0.91652441),
-    float2(-0.40773016,  0.13437238),
-    float2(-0.11189914,  0.88775164),
-    float2( 0.44046342,  0.57549924),
+    float2(0.47144005, -0.64096510),
+    float2(0.46977828, 0.91652441),
+    float2(-0.40773016, 0.13437238),
+    float2(-0.11189914, 0.88775164),
+    float2(0.44046342, 0.57549924),
     float2(-0.84226143, -0.11475760),
-    float2( 0.29200342, -0.05948252),
+    float2(0.29200342, -0.05948252),
     float2(-0.41221237, -0.00743513),
-    float2( 0.50645125, -0.15044230),
-    float2( 0.09115263,  0.41349834),
+    float2(0.50645125, -0.15044230),
+    float2(0.09115263, 0.41349834),
     float2(-0.15655446, -0.73037607)
-);
+};
 
 
 
@@ -272,7 +275,7 @@ uint GetCascadeNo()
     return 0;
 }
 
-// return 1 -> 빛을 받음. 0 -> 그림자 안 (빛을 안 받음)
+// return value : 통과율
 float CalcDirectionalShadow(float3 WorldPos)
 {
     // Disabled shadow is not included in ShadowInfos.
@@ -291,47 +294,65 @@ float CalcDirectionalShadow(float3 WorldPos)
     
     const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset + CascadeNo];
 
-    float4 ReceiverUV = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection) * float4(0.5f, -0.5f, 0.5f, 1.0f) + float4(0.5f, 0.5f, 0.5f, 0.0f);
+    float FrustumDepth = DirectionalShadowInfo.Depth;
+    float4 ReceiverUV = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection) * float4(0.5f, -0.5f, 1.0f, 1.0f) + float4(0.5f, 0.5f, 0.0f, 0.0f);
     ReceiverUV = ReceiverUV * float4(DirectionalShadowInfo.AtlasScale, 1.0f, 1.0f) + float4(DirectionalShadowInfo.AtlasOffet, 0.0f, 0.0f);
     
     
-    float StandardizedViewDepth = ReceiverUV.w + DirectionalShadowInfo.DepthBias;
+    float StandardizedViewDepth = ReceiverUV.z * FrustumDepth;
     
-    float SearchCasterRadius = StandardizedViewDepth * DirectionalShadowInfo.PrescaledTangentTheta;
+    float2 SearchCasterRadius = StandardizedViewDepth * DirectionalShadowInfo.PrescaledTangentTheta * DirectionalShadowInfo.AtlasScale.xy;
 
     float3 DuvDx = ddx(ReceiverUV);
     float3 DuvDy = ddy(ReceiverUV);
     
     float Det = DuvDx.x * DuvDy.y - DuvDx.y * DuvDy.x;
     float2x2 InvMatrix;
-    if (abs(Det) < 1e-6f)
+    if (abs(Det) < 1e-9f * DirectionalShadowInfo.AtlasScale.x)
     {
-        DuvDx.z = 0.0f;
-        DuvDy.z = 0.0f;
-        InvMatrix = float2x2(1, 0, 0, 1);
+       InvMatrix = float2x2(0, 0, 0, 0);
+       // return 1.0f;
     }
     else
     {
         InvMatrix = float2x2(DuvDy.y, -DuvDy.x, -DuvDx.y, DuvDx.x) / Det;
     }
     
+    float2 MapDu = float2(1.0f / DirectionalShadowInfo.TexelCountX, 0.0f);
+    float2 MapDv = float2(0.0f, 1.0f / DirectionalShadowInfo.TexelCountY);
     
+    float2 DxyDu = mul(MapDu, InvMatrix);
+    float2 DxyDv = mul(MapDv, InvMatrix);
     
+    float BlockAverage = 0.0f;
+    uint DepthCount = 0;
     for (uint i = 0; i < CASTER_SEARCH_COUNT; ++i)
     {
-        CascadeShadowMap.Sample(PointSampler, ReceiverUV.xy + SearchCasterRadius * PoissonDisk[i]);
+        float ReceiverDepth = PoissonDisk[i].x * SearchCasterRadius.x * DirectionalShadowInfo.TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * SearchCasterRadius.y * DirectionalShadowInfo.TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
+        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, ReceiverUV.xy + SearchCasterRadius * PoissonDisk[i], 0);
+        if (DepthSampled < ReceiverDepth)
+        {
+            BlockAverage += DepthSampled;
+            ++DepthCount;
+        }
     }
     
-    uint Width, Height;
-
-    ShadowMapAtlas.GetDimensions(Width, Height); // 텍스처 크기(텍셀 개수) 돌려주는 함수
-    const uint2 Texel = min(uint2(AtlasUV * float2(Width, Height)), uint2(Width - 1, Height - 1)); // UV = 1.0 이면 텍셀 밖이므로 clamp
-    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
-    return (Ndc.z - DirectionalShadowInfo.DepthBias > MapDepth) ? 0.0f : 1.0f;
-    ShadowMap.GetDimensions(Width, Height);   // 텍스처 크기(텍셀 개수) 돌려주는 내장함수
-    const uint2 Texel = min(uint2(UV * float2(Width, Height)), uint2(Width-1, Height-1));    // UV = 1.0 이면 텍셀 밖이므로 clamp
-    const float MapDepth = ShadowMap.Load(int3(Texel, 0));
-    return (Ndc.z - ShadowBias > MapDepth)? 0.0f : 1.0f;
+    if (DepthCount > 0)
+    {
+        BlockAverage /= DepthCount;
+        float2 BlockerRadius = DirectionalShadowInfo.PrescaledTangentTheta * FrustumDepth * (ReceiverUV.z - BlockAverage) * DirectionalShadowInfo.AtlasScale.xy;
+        float BlockAverage = 0.0f;
+        for (uint i = 0; i < CASTER_SAMPLE_COUNT; ++i)
+        {
+            float ReceiverDepth = PoissonDisk[i].x * BlockerRadius.x * DirectionalShadowInfo.TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * BlockerRadius.y * DirectionalShadowInfo.TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
+            BlockAverage += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, ReceiverUV.xy + BlockerRadius * PoissonDisk[i], ReceiverDepth);
+        }
+        return BlockAverage / CASTER_SAMPLE_COUNT;
+    }
+    else
+    {
+        return 1.0f;
+    }
 }
 
 // Directional Light의 영향을 구한다
