@@ -59,15 +59,7 @@ namespace
 			| (static_cast<uint64>(Group.LODIndex & 0x3) << 29);
 	}
 
-	void ExtractDepthRange(const FMatrix& P, float& OutNear, float& OutFar, bool& bOutOrtho)
-	{
-		const float ZScale = P.M[0][2];
-		const float ZOffset = P.M[3][2];
-		bOutOrtho = P.M[0][3] < 0.5f;                 // 원근: w = X (M[0][3] = 1), 직교: w = 1
-		OutNear = -ZOffset / ZScale;
-		OutFar = bOutOrtho ? OutNear + 1.0f / ZScale
-			: ZOffset / (1.0f - ZScale);
-	}
+	// ExtractDepthRange inline으로 옮김
 }
 
 bool FRenderer::Init()
@@ -80,16 +72,6 @@ bool FRenderer::Init()
 	LightCullingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightCullingConstants));
 	GridLightingCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
 	GridLightingFallbackCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGridConstants));
-	ShadowCB = RenderCommand::CreateConstantBuffer(sizeof(FShadowConstants));
-
-	D3D11_TEXTURE2D_DESC Desc{};
-	Desc.Width = Desc.Height = 2048;
-	Desc.MipLevels = 1; Desc.ArraySize = 1;
-	Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-	Desc.SampleDesc.Count = 1;
-	Desc.Usage = D3D11_USAGE_DEFAULT;
-	Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
-	ShadowMap = RenderCommand::CreateTexture2D(Desc);
 
 	LocalLightBuffer = RenderCommand::CreateDynamicStructuredBuffer(sizeof(FLightRenderParameters), MaxLocalLights);
 	const FLightGridConstants GridConstants{};
@@ -178,8 +160,6 @@ void FRenderer::RenderOpaque(const FMatrix& ViewProjection)
 	RenderCommand::BindShaderResource(10, LocalLightBuffer.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 	RenderCommand::BindShaderResource(12, TileIndexBuffer.get(), EShaderBindFlagBits::Pixel);
 	RenderCommand::BindConstantBuffer(5, GridLightingCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-	RenderCommand::BindShaderResource(13, ShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
 	DrawStaticGroups();
 	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
@@ -194,8 +174,6 @@ void FRenderer::RenderTranslucent(const FMatrix& ViewProjection)
 	// 2.5D 목록은 불투명 깊이 범위만 담으므로, 불투명보다 앞에 있는 반투명은 전체 순회로 그린다.
 	FConstantBuffer* GridCB = LightCullingMode == ELightCullingMode::Tiled25D ? GridLightingFallbackCB.get() : GridLightingCB.get();
 	RenderCommand::BindConstantBuffer(5, GridCB, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-	RenderCommand::BindShaderResource(13, ShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
 	DrawPackets(FirstTranslucentIndex, SortEntries.Num(), ViewProjection);
 	RenderPackets.Reset();
@@ -289,22 +267,18 @@ void FRenderer::RenderQueueSorting(FRenderQueue& InQueue, const FMatrix& ViewPro
 
 void FRenderer::RenderDepth(const FMatrix& ViewProjection)
 {
-	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
-	bDepthOnly = true;
-	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
-	bDepthOnly = false;
-
-	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
-	LastMesh = nullptr;
-	LastMaterial = nullptr;
+	RenderPreparedDepth(ViewProjection, false);
 }
 
-void FRenderer::RenderShadowDepth()
+void FRenderer::RenderPreparedDepth(const FMatrix& ViewProjection, bool bIncludeStaticGroups)
 {
 	// 불투명 두 경로(스태틱 묶음, 일반 패킷)를 PS 없이 그린다. 반투명은 깊이를 쓰지 않으므로 뺀다.
 	bDepthOnly = true;
-	DrawStaticGroups();
-	DrawPackets(0, FirstTranslucentIndex, ShadowData.LightViewProj);
+	if (bIncludeStaticGroups)
+	{
+		DrawStaticGroups();
+	}
+	DrawPackets(0, FirstTranslucentIndex, ViewProjection);
 	bDepthOnly = false;
 
 	// 본 패스가 머티리얼을 처음부터 다시 바인딩해 PS가 돌아오게 한다.
@@ -643,13 +617,6 @@ void FRenderer::SetLighting(FLightingConstants& LightingConstants, const TArray<
 	GridConstants.LightDebugMode = LightDebugMode;
 	RenderCommand::UpdateBufferData(GridLightingCB.get(), &GridConstants, sizeof(FLightGridConstants));
 }
-
-void FRenderer::SetShadow(const FShadowConstants& ShadowConstants)
-{	
-	ShadowData = ShadowConstants; 
-	RenderCommand::UpdateBufferData(ShadowCB.get(), &ShadowConstants, sizeof(FShadowConstants));
-}
-
 
 void FRenderer::CullLights(const FMatrix& View, const FMatrix& Projection, uint32 Width, uint32 Height, FTexture2D* DepthTexture)
 {
