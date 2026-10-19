@@ -6,6 +6,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Math/BVH.h"
+#include "PointLightSceneProxy.h"
 #include "Render/ShadowCascade.h"
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
@@ -213,26 +214,66 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		}
 	}
 
-	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
+	for (FLocalLightSceneProxy* LightProxy : LocalLightProxies)
 	{
-		FLightRenderParameters& P = LocalLightParameters[Proxy->PackedIndex];
-		Proxy->GetLightShaderParameters(P);
-		if (!Proxy->IsVisible())
-			P.Radius = 0.0f;                              // 칸은 유지하고 영향만 없앤다
-		
-		// TODO: If the light type is point, 
-		// create 6 shadow data for each face of the cube map,
-		// and add them to the light shadow data.
-		FShadowData ShadowData{
-			.LightViewProj = Proxy->GetShadowViewProjection(90, 0.1f, 10.0f),
-		};
+		FLightRenderParameters& LightParameter = LocalLightParameters[LightProxy->PackedIndex];
+		LightProxy->GetLightShaderParameters(LightParameter);
+		if (!LightProxy->IsVisible())
+			LightParameter.Radius = 0.0f;                              // 칸은 유지하고 영향만 없앤다
+
+		const ULightComponent* LightComponent = LightProxy->GetLightComponent();
+		const float NearZ = 0.1f;
+		const float FarZ = LightParameter.Radius;
+
+		if (LightProxy->IsVisible() == false || FarZ <= NearZ)
+			continue;
 
 		FLightShadowData Local{};
-		Local.LightSlotIndex = MaxDirectionalLights + Proxy->PackedIndex;
-		Local.Maps.Add(ShadowData);
-		Local.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
-		Local.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
-		Lights.Add(Local);
+		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
+		Local.DepthBias = LightComponent->GetShadowBias();
+		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
+
+		switch (LightComponent->GetLightType())
+		{
+		case ELightType::Spot:
+		{
+			const auto* SpotLight = static_cast<const USpotLightComponent*>(LightComponent);
+			const float OuterAngle = FMath::Clamp(SpotLight->GetOuterConeAngle(), 0.0f, 89.0f);
+
+			if (OuterAngle <= 0.0f)
+				continue;
+
+			FTransform LightTransform;
+			LightTransform.Rotation = SpotLight->GetWorldRotation();
+
+			FShadowData ShadowData{};
+			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), 2.0f * OuterAngle, NearZ, FarZ);
+
+			Local.Maps.Add(ShadowData);
+
+			break;
+		}
+		case ELightType::Point:
+		{
+			for (const auto& Face : FPointLightSceneProxy::GetShadowFaces())
+			{
+				FShadowData ShadowData{};
+				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, 90.0f, NearZ, FarZ);
+
+				Local.Maps.Add(ShadowData);
+			}
+
+			break;
+		}
+		default:
+			// assert(false);
+			break;
+		}
+
+		if (Local.Maps.Num() > 0)
+		{
+			Lights.Add(Local);
+		}
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
