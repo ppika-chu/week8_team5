@@ -5,41 +5,7 @@
 #include "RenderCommand.h"
 #include "RenderingInfo.h"
 
-#include "Engine/Scene.h"
-
-namespace
-{
-	// Camera Frustum에서 near, far 평면 꼭짓점 저장
-	void GetFrustumPlaneCorners(const FMatrix& CameraViewProj, FVector OutNear[4], FVector OutFar[4])
-	{
-		const FMatrix InvVp = CameraViewProj.Inverse();
-		for (int i = 0; i < 4; ++i)
-		{
-			const float x = (i & 1) ? 1.0f : -1.0f;
-			const float y = (i & 2) ? 1.0f : -1.0f;
-			const FVector4 N = InvVp.TransformFVector4(FVector4(x, y, 0.0f, 1.0f));
-			const FVector4 F = InvVp.TransformFVector4(FVector4(x, y, 1.0f, 1.0f));
-
-			OutNear[i] = FVector(N.X, N.Y, N.Z) / N.W; 
-			OutFar[i] = FVector(F.X, F.Y, F.Z) / F.W;;
-		}
-	}
-
-	// SliceNear, SliceFar 만큼 잘라서 꼭짓점 저장
-	void GetSliceCorners(const FVector Near[4], const FVector Far[4], float CamNear, float CamFar, float SliceNear, float SliceFar, FVector OutCorners[8])
-	{
-		const float Range = CamFar - CamNear;
-		const float tNear = (SliceNear - CamNear) / Range; 
-		const float tFar = (SliceFar - CamNear) / Range;
-
-		for (int i = 0; i < 4; ++i)
-		{
-			const FVector Edge = Far[i] - Near[i];		// i번 edge
-			OutCorners[i] = Near[i] + Edge * tNear;		// near 꼭짓점
-			OutCorners[i+4] = Near[i] + Edge * tFar;	// Far 꼭짓점
-		}
-	}
-}
+constexpr uint32 MaxShadowInfos = 64;
 
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
@@ -50,49 +16,116 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	Renderer = InRenderer;
 
-	ShadowCB = RenderCommand::CreateConstantBuffer(
-		sizeof(FShadowConstants));
+	ShadowInfosBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FShadowInfo),
+		MaxShadowInfos);
 
-	if (!ShadowCB || !ShadowCB->GetBuffer())
+	if (!ShadowInfosBuffer || !ShadowInfosBuffer->GetSRV())
 	{
 		return false;
 	}
 
-	D3D11_TEXTURE2D_DESC Desc{
-		.Width = 2048,
-		.Height = 2048,
-		.MipLevels = 1,
-		.ArraySize = 1,
-		.Format = DXGI_FORMAT_R24G8_TYPELESS,
-		.SampleDesc = {
-			.Count = 1,
-			.Quality = 0
-		},
-		.Usage = D3D11_USAGE_DEFAULT,
-		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
-	};
+	LightShadowRangesBuffer = RenderCommand::CreateDynamicStructuredBuffer(
+		sizeof(FLightShadowRange),
+		MaxDirectionalLights + MaxLocalLights);
 
-	ShadowMap = RenderCommand::CreateTexture2D(Desc);
-	
-	if (!ShadowMap ||
-		!ShadowMap->GetDSV() ||
-		!ShadowMap->GetSRV())
+	if (!LightShadowRangesBuffer || !LightShadowRangesBuffer->GetSRV())
 	{
 		return false;
 	}
 
-	SetParameters(FShadowConstants{});
+	if (!ShadowAtlas.Init(16384, 2048))
+	{
+		return false;
+	}
+
+	SetParameters({}, 0);
 
 	return true;
 }
 
-void FShadowRenderer::SetParameters(const FShadowConstants& Parameters)
+void FShadowRenderer::SetParameters(
+	const TArray<FLightShadowData>& Lights,
+	uint32 LightSlotCount)
 {
-	ShadowData = Parameters;
+	ShadowAtlas.ResetAllocations();
+
+	ShadowInfos.Reset(MaxShadowInfos);
+	ShadowAllocations.Reset(MaxShadowInfos);
+	LightShadowRanges.Reset(LightSlotCount);
+
+	const uint32 SlotCount = LightSlotCount > 0 ? LightSlotCount : 1;
+
+	// Ensure SlotCount <= size of range buffer
+	for (uint32 i = 0; i < SlotCount; ++i)
+	{
+		LightShadowRanges.Add(FLightShadowRange{});
+	}
+
+	for (const FLightShadowData& Light : Lights)
+	{
+		if (Light.LightSlotIndex >= SlotCount)
+			continue;
+
+		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
+
+		// Skip if no shadow maps or not enough space in the atlas or shadow info buffer
+		if (MapCount == 0 ||
+			MapCount > ShadowAtlas.GetRemainingTileCount() ||
+			static_cast<uint32>(ShadowInfos.Num()) + MapCount > MaxShadowInfos)
+		{
+			continue;
+		}
+
+		FLightShadowRange Range{
+			.Offset = static_cast<uint32>(ShadowInfos.Num()),
+		};
+
+		const float DepthBias = Light.DepthBias;
+		for (const FShadowData& Data : Light.Maps)
+		{
+			FShadowAtlasAllocation Allocation{};
+			if (!ShadowAtlas.Allocate(&Allocation))
+			{
+				break;
+			}
+
+			const float InvAtlasSize =
+				1.0f
+				/ static_cast<float>(ShadowAtlas.GetSize());
+
+			FShadowInfo ShadowInfo{
+				.LightViewProj = Data.LightViewProj,
+				.AtlasOffset = {
+					Allocation.X * InvAtlasSize,
+					Allocation.Y * InvAtlasSize
+				},
+				.AtlasScale = {
+					Allocation.Width * InvAtlasSize,
+					Allocation.Height * InvAtlasSize
+				},
+				.DepthBias = DepthBias
+			};
+
+			ShadowInfos.Add(ShadowInfo);
+			ShadowAllocations.Add(Allocation);
+		};
+
+		Range.Count = static_cast<uint32>(
+			ShadowInfos.Num() - Range.Offset);
+
+		LightShadowRanges[Light.LightSlotIndex] = Range;
+	}
+
 	RenderCommand::UpdateBufferData(
-		ShadowCB.get(), 
-		&Parameters, 
-		sizeof(FShadowConstants));
+		ShadowInfosBuffer.get(),
+		ShadowInfos.GetData(),
+		static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
+
+	RenderCommand::UpdateBufferData(
+		LightShadowRangesBuffer.get(),
+		LightShadowRanges.GetData(),
+		static_cast<uint32>(LightShadowRanges.size() * sizeof(FLightShadowRange)));
 }
 
 void FShadowRenderer::BindForLighting() const
@@ -101,127 +134,67 @@ void FShadowRenderer::BindForLighting() const
 		EShaderBindFlagBits::Vertex |
 		EShaderBindFlagBits::Pixel;
 
-	RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
-	RenderCommand::BindShaderResource(13, ShadowMap.get(), Stages);
+	//RenderCommand::BindConstantBuffer(6, ShadowCB.get(), Stages);
+	RenderCommand::BindShaderResource(13, ShadowAtlas.GetTexture(), Stages);
+	RenderCommand::BindShaderResource(14, ShadowInfosBuffer.get(), Stages);
+	RenderCommand::BindShaderResource(15, LightShadowRangesBuffer.get(), Stages);
 }
 
-// Cascade N장은 같은 Resource 사용하므로 패스마다 unbind할 필요없음.
-void FShadowRenderer::BeginShadowPasses()
+void FShadowRenderer::BeginShadowPass()
 {
-	RenderCommand::UnbindShaderResource(
-	13,
-	EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-}
+	constexpr auto Stages =
+		EShaderBindFlagBits::Vertex |
+		EShaderBindFlagBits::Pixel;
 
-FCascadeData FShadowRenderer::FitCascade(const FVector Corners[8], const FVector& F, const FVector& R, const FVector& U, const FBox& SceneBounds) const
-{
-	// cascade를 감싸는 구 만들기
-	FVector Center(0.0f, 0.0f, 0.0f);
-	for (int32 i = 0; i < 8; ++i) Center += Corners[i];
-	Center /= 8.0f;
+	RenderCommand::UnbindShaderResource(13, Stages);
 
-	float Radius = 0.0f;
-	for (int32 i = 0; i < 8; ++i) Radius = FMath::Max(Radius, (Corners[i] - Center).Length());
-	Radius = std::ceil(Radius * 16.0f) / 16.0f;		// 부동소수 오차 방지 ( 16은 그냥 임의 파라미터 )
-
-	// 박스 폭, 텍셀 크기
-	const float Size = Radius * 2.0f;
-	const float Texel = Size / static_cast<float>(ShadowMap->GetWidth());
-
-	// 텍셀 스냅 ( 반짝이는 그림자 방지 ) - Center를 텍셀 격차에 맞춰 옮기기
-	const float CX = Center.Dot(R);		// Center가 Right 방향으로 어디있나
-	const float CY = Center.Dot(U);		// Center가 Up 방향으로 어디있나
-	Center += R * (std::floor(CX / Texel) * Texel - CX);
-	Center += U * (std::floor(CY / Texel) * Texel - CY);
-
-	// Near를 빛 쪽으로 당기기
-	// Forward 성분이 양수인 축은 Min 쪽이, 음수인 축은 Max 쪽이 빛에 가까움
-	const FVector Nearest(
-		F.X >= 0 ? SceneBounds.Min.X : SceneBounds.Max.X,
-		F.Y >= 0 ? SceneBounds.Min.Y : SceneBounds.Max.Y,
-		F.Z >= 0 ? SceneBounds.Min.Z : SceneBounds.Max.Z);
-	
-	// Light Frustum의 Near, Far
-	float TNear = std::min(-Radius, F.Dot(Nearest - Center));
-	const float TFar = Radius;
-
-	const FVector Eye = Center + F * TNear;
-	const float Depth = TFar - TNear;
-	
-	FCascadeData Cascade{};
-
-	// Light View * Light Projection
-	Cascade.LightViewProj = FMatrix::MakeView(Eye, F, R, U) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Depth);
-	Cascade.Size = Size;
-	Cascade.Depth = Depth;
-	return Cascade;
-
-}
-
-// Index 번 Cascade의 깊이를 rendering.
-void FShadowRenderer::RenderCascade(uint32 Index, FRenderQueue& Queue)
-{
-	FRenderingInfo Target{
+	FRenderingInfo Pass{
 		.ViewportSetting = {
-			.Width = ShadowMap->GetWidth(),
-			.Height = ShadowMap->GetHeight()
+			.Width = ShadowAtlas.GetSize(),
+			.Height = ShadowAtlas.GetSize(),
 		},
 		.DepthStencil = {
-			.Texture = ShadowMap.get(),
+			.Texture = ShadowAtlas.GetTexture(),
 			.LoadOp = ERenderTargetLoadOp::Clear
 		}
 	};
-	RenderDepthToTarget(Queue, GetCascadeViewProjection(Index), Target);
+
+	RenderCommand::BeginRenderPass(Pass);
+
+	RenderCommand::SetRasterizerState(
+		ERasterizerState::ShadowDepth);
+	RenderCommand::SetPrimitiveTopology(
+		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
-void FShadowRenderer::UpdateCascades(const FScene& Scene, const FMatrix& CameraViewProj, const FMatrix& CameraProj, float ShadowDistance)
+void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
 {
-	FShadowConstants Constants{};	// bShadowEnabled = 0
-	const FDirectionalLightSceneProxy* Light = Scene.GetMainDirectionalLight();
-	const FBox& Bounds = Scene.GetBounds();
-	const bool bHasGeometry = (Bounds.Max - Bounds.Min).Length() > 0.0f;		// 빈 Scene이면 false
+	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	const FShadowAtlasAllocation& Tile =
+		ShadowAllocations[ShadowInfoIndex];
 
-	if (Light && bHasGeometry)
-	{
-		// light axis
-		FVector F, R, U;
-		Light->GetShadowBasis(F, R, U);
+	RenderCommand::SetViewport(
+		Tile.X, Tile.Y, Tile.Width, Tile.Height
+	);
 
-		float CamNear, CamFar;
-		bool bOrtho;
-		ExtractDepthRange(CameraProj, CamNear, CamFar, bOrtho);
-		const float SliceFar = FMath::Min(CamFar, CamNear + ShadowDistance);
-		
-		// Camera Frustum Near ~ SliceFar
-		FVector Near[4], Far[4], Corners[8];
-		GetFrustumPlaneCorners(CameraViewProj, Near, Far);
-		GetSliceCorners(Near, Far, CamNear, CamFar, CamNear, SliceFar, Corners);
+	Renderer->RenderQueueSorting(
+		ShadowQueue,
+		ShadowInfo.LightViewProj);
 
-		// Todo : CSM 늘어나면 for문 돌릴 예정. 일단은 하나라서 [0]
-		FCascadeData& Cascade = Constants.Cascades[0];
-		Cascade = FitCascade(Corners, F, R, U, Bounds);
-		Cascade.Bias = Light->GetLightComponent()->GetShadowBias();
-
-		// Todo : 컴포넌트 프로퍼티 추가 후 연결해야 함.
-		Constants.NumCascades = 1;
-		Constants.LightSourceAngle = 0.0f;
-		Constants.CascadeBlendWidth = 0.0f;
-
-	}
-	
-	// b6 업로드
-	SetParameters(Constants);
-
+	Renderer->RenderPreparedDepth(
+		ShadowInfo.LightViewProj, true);
 }
 
-void FShadowRenderer::RenderDepthToTarget(FRenderQueue& Queue, const FMatrix& LightViewProj, const FRenderingInfo& Target)
+void FShadowRenderer::EndShadowPass()
 {
-	RenderCommand::BeginRenderPass(Target);
-	Renderer->RenderQueueSorting(Queue, LightViewProj);
-	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
-	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	Renderer->RenderPreparedDepth(LightViewProj, true);
-	RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
-	RenderCommand::EndRenderPass(Target);
+	FRenderingInfo Pass{
+		.DepthStencil = {
+			.Texture = ShadowAtlas.GetTexture()
+		}
+	};
 
+	RenderCommand::EndRenderPass(Pass);
+
+	RenderCommand::SetRasterizerState(
+		ERasterizerState::SolidBack);
 }

@@ -150,9 +150,9 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer)
+void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 {
-	if (!Renderer) return;
+	if (!Renderer || !ShadowRenderer) return;
 	
 	FLightingConstants Constants{};
 	Constants.Ambient.Color = FVector(1, 1, 1);
@@ -167,7 +167,8 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		break;
 	}
 	
-	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())
+	TArray<FLightShadowData> Lights;
+	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
 	{
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
@@ -175,6 +176,29 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		Constants.Directional.Color = P.Color;
 		Constants.Directional.Intensity = P.Intensity;
 
+		// 씬 전체를 감싸는 Ortho 박스. 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
+		const FBox& Bounds = GetBounds();
+		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
+		if (Radius > 0.0f)
+		{
+			const FVector Center = (Bounds.Max + Bounds.Min) * 0.5f;
+			const float Size = 2.0f * Radius;		// 빛 방향(Depth)과 수직 방향(Right, Up) 모두 지름
+
+			FVector Forward, Right, Up;
+			Proxy->GetShadowBasis(Forward, Right, Up);
+			const FVector Eye = Center - Forward * Radius;
+
+			FShadowData ShadowData{
+				.LightViewProj = FMatrix::MakeView(Eye, Forward, Right, Up) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Size),
+			};
+
+			FLightShadowData Directional{};
+			Directional.LightSlotIndex = 0;
+			Directional.Maps.Add(ShadowData);
+			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+
+			Lights.Add(Directional);
+		}
 	}
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
@@ -183,60 +207,23 @@ void FScene::UpdateLights(FRenderer* Renderer)
 		Proxy->GetLightShaderParameters(P);
 		if (!Proxy->IsVisible())
 			P.Radius = 0.0f;                              // 칸은 유지하고 영향만 없앤다
-			/*FTransform Transform;
-			Transform.Rotation = Spot->GetWorldRotation();
-			const FLinearColor Color(Spot->GetLightColor());
+		
+		// TODO: If the light type is point, 
+		// create 6 shadow data for each face of the cube map,
+		// and add them to the light shadow data.
+		FShadowData ShadowData{
+			.LightViewProj = Proxy->GetShadowViewProjection(90, 0.1f, 10.0f),
+		};
 
-			Constants.SpotLights[Constants.NumSpotLights].Color = FVector(Color.R, Color.G, Color.B);
-			Constants.SpotLights[Constants.NumSpotLights].Direction = Transform.GetForward();
-			Constants.SpotLights[Constants.NumSpotLights].FalloffExponent = Spot->GetFalloff();
-			Constants.SpotLights[Constants.NumSpotLights].Intensity = Spot->GetIntensity();
-			Constants.SpotLights[Constants.NumSpotLights].Position = Spot->GetWorldLocation();
-			Constants.SpotLights[Constants.NumSpotLights].Radius = Spot->GetAttenuationRadius();
-			const float SafeOuterAngle = FMath::Clamp(Spot->GetOuterConeAngle(), 0.0f, 89.0f);
-			const float SafeInnerAngle = FMath::Clamp(Spot->GetInnerConeAngle(), 0.0f, SafeOuterAngle);
-			Constants.SpotLights[Constants.NumSpotLights].InnerConeCos = std::cos(FMath::DegreesToRadians(SafeInnerAngle));
-			Constants.SpotLights[Constants.NumSpotLights].OuterConeCos = std::cos(FMath::DegreesToRadians(SafeOuterAngle));
-			Constants.NumSpotLights++;
-		}
-		else if (UPointLightComponent* Point = Cast<UPointLightComponent>(Light))
-		{
-			const FLinearColor Color(Point->GetLightColor());
-			FPointLightInfo Info{};
-			Info.Position = Point->GetWorldLocation();
-			Info.Radius = Point->GetAttenuationRadius();
-			Info.Color = FVector(Color.R, Color.G, Color.B);
-			Info.Intensity = Point->GetIntensity();
-			Info.FalloffExponent = Point->GetFalloff();
-			PointLights.Add(Info);
-		}
-		else if (URectLightComponent* Rect = Cast<URectLightComponent>(Light))
-		{
-			if (Constants.NumRectLights >= MaxRectLights)
-				continue;
-
-			FTransform Transform;
-			Transform.Rotation = Rect->GetWorldRotation();
-			const FLinearColor Color(Rect->GetLightColor());
-
-			FRectLightInfo& Info = Constants.RectLights[Constants.NumRectLights++];
-			Info.Position   = Rect->GetWorldLocation();
-			Info.Radius     = Rect->GetAttenuationRadius();
-			Info.Color      = FVector(Color.R, Color.G, Color.B);
-			Info.Intensity  = Rect->GetIntensity();
-			Info.Direction  = Transform.GetForward();
-			Info.Right      = Transform.GetRight();
-			Info.HalfWidth  = Rect->GetWidth() * 0.5f;
-			Info.HalfHeight = Rect->GetHeight() * 0.5f;
-
-			const float AngleRad = FMath::DegreesToRadians(FMath::Clamp(Rect->GetBarnDoorAngle(), 0.0f, 90.0f));
-			Info.BarnDoorCos    = std::cos(AngleRad);
-			Info.BarnDoorSin    = std::sin(AngleRad);
-			Info.BarnDoorLength = std::max(Rect->GetBarnDoorLength(), 0.0f);
-		}*/
+		FLightShadowData Local{};
+		Local.LightSlotIndex = MaxDirectionalLights + Proxy->PackedIndex;
+		Local.Maps.Add(ShadowData);
+		Local.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+		Lights.Add(Local);
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
+	ShadowRenderer->SetParameters(Lights, MaxDirectionalLights + MaxLocalLights);
 }
 
 const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const

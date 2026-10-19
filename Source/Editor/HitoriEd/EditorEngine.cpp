@@ -43,9 +43,6 @@ namespace
 
 #include "Core/SplashScreen.h"
 
-// Todo : SettingsPannel 옮겨서 Editor에서 숨길 수 있도록
-constexpr float ShadowDistance = 50.0f;
-
 FEngineConfig UEditorEngine::GetConfig() const
 {
 	FEngineConfig Desc;
@@ -236,31 +233,31 @@ bool UEditorEngine::Init()
 	const ImVec4 White = { 1, 1, 1, 1 };
 	const ImVec4 Green = { 0.40f, 0.80f, 0.30f, 1.0f };
 
-	Save = { "Save",   "Save Current Scene",UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Save.png"),  White, { EKeyCode::S, true } };
+	Save = { "Save",   "Save Current Scene",UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Save.png"),  White,{ EKeyCode::S, true } };
 
-	Play = { "Play",   "Play World",        UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  Green, { EKeyCode::P, false, true } };
+	Play = { "Play",   "Play World",        UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  Green,{ EKeyCode::P, false, true } };
 
 	Play.CanExecute = [this]()->bool {return !PlayWorld; };
 	Play.Execute = [this]() { RequestPlaySession(); };
 
-	Pause = { "Pause",  "Pause",			UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Pause.png"), White, { EKeyCode::Pause } };
+	Pause = { "Pause",  "Pause",			UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Pause.png"), White,{ EKeyCode::Pause } };
 
 	Pause.CanExecute = [this]()->bool {return !bIsPaused && PlayWorld; };
 	Pause.Execute = [this]() { bIsPaused = true; };
 
 
-	Resume = { "Resume", "Resume",          UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  White, { EKeyCode::Pause } };
+	Resume = { "Resume", "Resume",          UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Play.png"),  White,{ EKeyCode::Pause } };
 
 	Resume.CanExecute = [this]()->bool {return bIsPaused && PlayWorld; };
 	Resume.Execute = [this]() { bIsPaused = false; };
 
-	StepFrame = { "Step", "Step One Frame", UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Step.png"),  White, {} };
+	StepFrame = { "Step", "Step One Frame", UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Step.png"),  White,{} };
 
 	StepFrame.CanExecute = [this]()->bool {return bIsPaused && PlayWorld; };
-	StepFrame.Execute = [this]() { bStepRequested= true; };
+	StepFrame.Execute = [this]() { bStepRequested = true; };
 
 
-	Stop = { "Stop",   "Stop",				UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Stop.png"),  White, { EKeyCode::Escape } };
+	Stop = { "Stop",   "Stop",				UAssetManager::GetAssetByPath<UTexture2D>("Assets/Icons/Toolbar/Stop.png"),  White,{ EKeyCode::Escape } };
 
 	Stop.CanExecute = [this]()->bool {return PlayWorld; };
 	Stop.Execute = [this]() { RequestEndPlayMap(); };
@@ -382,7 +379,7 @@ void UEditorEngine::TickWorldAndEditor(const float DeltaTime)
 			GetActiveWorld()->Tick(1.0f / 60.0f);
 			bStepRequested = false;
 		}
-		else if(!bIsPaused)
+		else if (!bIsPaused)
 			GetActiveWorld()->Tick(DeltaTime);
 
 	}
@@ -426,17 +423,10 @@ void UEditorEngine::RenderMultipleViewports()
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
 			// ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer);
+			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
+			RenderShadowPass();
 			CapturedWorld = ViewWorld;
 		}
-
-		ShadowRenderer->UpdateCascades(
-			ViewWorld->GetScene(),
-			MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
-			MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
-			ShadowDistance);
-		
-		RenderShadowPass();
 
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
@@ -465,7 +455,7 @@ void UEditorEngine::RenderMultipleViewports()
 			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer);
+			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
 			CapturedWorld = ViewWorld;
 		}
 
@@ -742,7 +732,7 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 		// 아이콘 먼저 그리기 (반투명)
 		Renderer->RenderQueueSorting(IconQueue, ViewProjection, ViewCameraLocation);
 		Renderer->RenderTranslucent(ViewProjection);
-		
+
 		// 화살표 그리기 (불투명)
 		Renderer->RenderQueueSorting(ArrowQueue, ViewProjection, ViewCameraLocation);
 		Renderer->RenderOpaque(ViewProjection);
@@ -773,9 +763,9 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 
 	// 선택 대상은 한 월드에만 속하므로 그 월드를 그리는 View에만 표시한다.
 	const auto IsInViewWorld = [&ViewWorld](const UActorComponent* Component)
-	{
-		return Component && Component->GetOwner() && Component->GetOwner()->GetWorld() == &ViewWorld;
-	};
+		{
+			return Component && Component->GetOwner() && Component->GetOwner()->GetWorld() == &ViewWorld;
+		};
 
 	// 스텐실 기반이라 선택 대상의 가시성이 꺼져 있어도 외곽선만 그린다.
 	if (bShowEditorOverlay && IsInViewWorld(Outline->GetTarget()))
@@ -911,14 +901,18 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 void UEditorEngine::RenderShadowPass()
 {
 	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
-	ShadowRenderer->BeginShadowPasses();
 
-	// Cascade 수만큼 Queue 만들고 Render
-	for (uint32 Index = 0; Index < ShadowRenderer->GetNumCascades(); ++Index)
+	ShadowRenderer->BeginShadowPass();
+
+	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
+	//for (const FShadowInfo& ShadowInfo : ShadowInfos)
+	for (uint32 i = 0; i < static_cast<uint32>(ShadowInfos.Num()); ++i)
 	{
-		MultipleViewportsAdapter.BuildShadowQueue(ShadowRenderer->GetCascadeViewProjection(Index), ShadowQueue);
-		ShadowRenderer->RenderCascade(Index, ShadowQueue);
+		MultipleViewportsAdapter.BuildShadowQueue(
+			ShadowInfos[i].LightViewProj, ShadowQueue);
+		ShadowRenderer->OnRender(ShadowQueue, i);
 	}
+	ShadowRenderer->EndShadowPass();
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.

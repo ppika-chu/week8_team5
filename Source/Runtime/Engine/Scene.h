@@ -12,7 +12,8 @@
 #include "Math/BVH.h"
 #include "Render/FogInfo.h"
 #include "Render/Renderer.h"
- 
+#include "Render/ShadowRenderer.h"
+
 struct FExponentialHeightFogSceneInfo
 {
 	uint32 Id;
@@ -22,7 +23,7 @@ struct FExponentialHeightFogSceneInfo
 struct FLightSceneInfo
 {
 	uint32 Id;
-	
+
 };
 
 class FScene
@@ -37,7 +38,7 @@ public:
 	void RemoveLight(ULightComponent* Component);
 
 	void RemoveAllLights();
-	void UpdateLights(FRenderer* Renderer);
+	void UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer);
 
 	void AddFogInfo(uint32 Id, const FFogInfo& FogInfo);
 	void RemoveFogInfo(uint32 Id);
@@ -58,7 +59,7 @@ public:
 	TArray<FPrimitiveSceneProxy*> RenderStateDirtyProxies;
 	TArray<FAABB> PrimitiveBounds;
 	TArray<uint8> PrimitiveFlags;
-	
+
 	TArray<FExponentialHeightFogSceneInfo> FogInfos;
 
 	// 컬링 결과로 프록시를 바로 내보내 컴포넌트를 역참조하지 않는다. 경계는 Build/Refit 때만 계산한다.
