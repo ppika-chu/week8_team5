@@ -6,6 +6,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Math/BVH.h"
+#include "Render/ShadowCascade.h"
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
@@ -150,7 +151,7 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
+void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, float ShadowDistance)
 {
 	if (!Renderer || !ShadowRenderer) return;
 	
@@ -181,21 +182,30 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
 		if (Radius > 0.0f)
 		{
-			const FVector Center = (Bounds.Max + Bounds.Min) * 0.5f;
-			const float Size = 2.0f * Radius;		// 빛 방향(Depth)과 수직 방향(Right, Up) 모두 지름
-
 			FVector Forward, Right, Up;
-			Proxy->GetShadowBasis(Forward, Right, Up);
-			const FVector Eye = Center - Forward * Radius;
+			Proxy->GetShadowBasis(Forward,Right, Up);
 
-			FShadowData ShadowData{
-				.LightViewProj = FMatrix::MakeView(Eye, Forward, Right, Up) * FMatrix::MakeOrthographic(Size, Size, 0.0f, Size),
-			};
+			// Camera near/far
+			float CamNear, CamFar;
+			bool bOrtho;
+			ExtractDepthRange(CameraProj, CamNear, CamFar, bOrtho);
+			
+			// Shadow Distance 만큼 자르기
+			const float SliceFar = FMath::Min(CamFar, CamNear + ShadowDistance);
+
+			// 카메라 조각 꼭짓점 8개
+			FVector Near[4], Far[4], Corners[8];
+			GetFrustumPlaneCorners(CameraViewProj, Near, Far);
+			GetSliceCorners(Near, Far, CamNear, CamFar, CamNear, SliceFar, Corners);
 
 			FLightShadowData Directional{};
 			Directional.LightSlotIndex = 0;
-			Directional.Maps.Add(ShadowData);
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+
+			// Todo : Cascade 구간 분할 루프. 지금은 1장
+			Directional.Maps.Add(FShadowData{
+				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, ShadowRenderer->GetTileSize()),
+			});
 
 			Lights.Add(Directional);
 		}

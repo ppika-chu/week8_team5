@@ -43,6 +43,9 @@ namespace
 
 #include "Core/SplashScreen.h"
 
+// Todo: SettingsPanel로 옮겨 에디터에서 조절할 수 있게
+constexpr float ShadowDistance = 50.0f;
+
 FEngineConfig UEditorEngine::GetConfig() const
 {
 	FEngineConfig Desc;
@@ -423,12 +426,16 @@ void UEditorEngine::RenderMultipleViewports()
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
 			// ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
-			RenderShadowPass();
 			CapturedWorld = ViewWorld;
 		}
-
-		{
+		
+		// View 마다 실행 ( Directional Shadow Box 는 View마다 다르기 때문 )
+		ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get(),
+										   MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
+										   MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
+										   ShadowDistance);
+		RenderShadowPass();
+		{	
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
 			MultipleViewportsAdapter.BuildRenderQueue(ViewIndex, RenderQueue, IconQueue, ArrowQueue);
 		}
@@ -455,10 +462,15 @@ void UEditorEngine::RenderMultipleViewports()
 			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
 			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
-			ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get());
 			CapturedWorld = ViewWorld;
 		}
-
+		ViewWorld->GetScene().UpdateLights(Renderer,
+										   ShadowRenderer.get(),
+										   MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
+										   MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
+										   ShadowDistance);
+		RenderShadowPass();
+		
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
 			MultipleViewportsAdapter.BuildRenderQueue(PIEViewIndex, RenderQueue, IconQueue, ArrowQueue);

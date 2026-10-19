@@ -56,6 +56,7 @@ public:
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
 	//const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
+	uint32 GetTileSize() const { return ShadowAtlas.GetTilesize(); }
 
 private:
 	FRenderer* Renderer = nullptr;
