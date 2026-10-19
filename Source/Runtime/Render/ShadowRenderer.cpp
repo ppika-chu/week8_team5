@@ -255,6 +255,8 @@ void FShadowRenderer::BindForLighting() const
 	RenderCommand::BindShaderResource(13, ShadowAtlas.GetTexture(), Stages);
 	RenderCommand::BindShaderResource(14, ShadowInfosBuffer.get(), Stages);
 	RenderCommand::BindShaderResource(15, LightShadowRangesBuffer.get(), Stages);
+	RenderCommand::BindSamplerState(1, ESamplerState::PointClamp, Stages);
+	RenderCommand::BindSamplerState(2, ESamplerState::ComparisonLinearClamp, Stages);
 }
 
 void FShadowRenderer::BeginShadowPass()

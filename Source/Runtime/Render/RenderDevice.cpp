@@ -412,5 +412,17 @@ void FRenderDevice::CreateStates()
 		Desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
 
 		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::LinearWrap].GetAddressOf());
+
+		Desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+		Desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+		Desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		Desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+
+		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::PointClamp].GetAddressOf());
+
+		Desc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+		Desc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+
+		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::ComparisonLinearClamp].GetAddressOf());
 	}
 }
