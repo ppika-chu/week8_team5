@@ -9,6 +9,32 @@
 #include "PointLightSceneProxy.h"
 #include "Render/ShadowCascade.h"
 
+namespace
+{
+	float GetPaddedShadowFov(
+		float OriginalFovDegrees,
+		uint32 Resolution,
+		uint32 PaddingPixels = 4)
+	{
+		assert(Resolution > 2 * PaddingPixels);
+
+		constexpr float DegreesToRadians = 3.14159265358979323846f / 180.0f;
+		constexpr float RadiansToDegrees = 180.0f / 3.14159265358979323846f;
+
+		// Scale = (Resolution / (Resolution - 2 * PaddingPixels))
+		const float Scale =
+			static_cast<float>(Resolution) /
+			static_cast<float>(Resolution - 2 * PaddingPixels);
+
+		const float HalfFovRadians =
+			OriginalFovDegrees * 0.5f * DegreesToRadians;
+
+		// Fov = 2 * atan(tan(HalfFov) * Scale)
+		return 2.0f *
+			std::atan(std::tan(HalfFovRadians) * Scale) * RadiansToDegrees;	
+	}
+}
+
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
 	if (!Component || Component->SceneProxy) return;
@@ -232,6 +258,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
 		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
+		const uint32 Resolution = Local.ResolutionScale * DefaultShadowResolution;
 
 		switch (LightComponent->GetLightType())
 		{
@@ -243,11 +270,13 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			if (OuterAngle <= 0.0f)
 				continue;
 
+			const float ShadowFov = GetPaddedShadowFov(OuterAngle * 2.0f, Resolution);
+
 			FTransform LightTransform;
 			LightTransform.Rotation = SpotLight->GetWorldRotation();
 
 			FShadowData ShadowData{};
-			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), 2.0f * OuterAngle, NearZ, FarZ);
+			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), ShadowFov, NearZ, FarZ);
 
 			Local.Maps.Add(ShadowData);
 
@@ -255,10 +284,12 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		}
 		case ELightType::Point:
 		{
+			const float ShadowFov = GetPaddedShadowFov(90.0f, Resolution);
+
 			for (const auto& Face : FPointLightSceneProxy::GetShadowFaces())
 			{
 				FShadowData ShadowData{};
-				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, 90.0f, NearZ, FarZ);
+				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, ShadowFov, NearZ, FarZ);
 
 				Local.Maps.Add(ShadowData);
 			}
