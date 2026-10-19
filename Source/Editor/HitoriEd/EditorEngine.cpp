@@ -914,9 +914,14 @@ void UEditorEngine::RenderShadowPass()
 {
 	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
 
+	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
+	if (ShadowInfos.Num() == 0)
+	{
+		return;
+	}
+
 	ShadowRenderer->BeginShadowPass();
 
-	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
 	//for (const FShadowInfo& ShadowInfo : ShadowInfos)
 	for (uint32 i = 0; i < static_cast<uint32>(ShadowInfos.Num()); ++i)
 	{
