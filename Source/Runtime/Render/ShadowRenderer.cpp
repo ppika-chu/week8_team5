@@ -34,7 +34,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	if (!ShadowAtlas.Init(16384, 4096))
+	if (!ShadowAtlas.Init(16384))
 	{
 		return false;
 	}
@@ -76,9 +76,8 @@ void FShadowRenderer::SetParameters(
 
 		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
 
-		// Skip if no shadow maps or not enough space in the atlas or shadow info buffer
+		// Skip if no shadow maps or shadow info buffer
 		if (MapCount == 0 ||
-			MapCount > ShadowAtlas.GetRemainingTileCount() ||
 			static_cast<uint32>(ShadowInfos.Num()) + MapCount > MaxShadowInfos)
 		{
 			continue;
@@ -89,10 +88,11 @@ void FShadowRenderer::SetParameters(
 		};
 
 		const float DepthBias = Light.DepthBias;
+		const uint32 Resolution = static_cast<uint32>(Light.ResolutionScale * DefaultShadowResolution);
 		for (const FShadowData& Data : Light.Maps)
 		{
 			FShadowAtlasAllocation Allocation{};
-			if (!ShadowAtlas.Allocate(Light.ResolutionScale, &Allocation))
+			if (!ShadowAtlas.Allocate(Resolution, &Allocation))
 			{
 				break;
 			}

@@ -2,10 +2,9 @@
 #include "ShadowAtlas.h"
 #include "RenderCommand.h"
 
-bool FShadowAtlas::Init(uint32 InAtlasSize, uint32 InTilesize)
+bool FShadowAtlas::Init(uint32 InAtlasSize)
 {
-	if (InAtlasSize == 0 || InTilesize == 0 ||
-		InAtlasSize % InTilesize != 0)
+	if (InAtlasSize == 0)
 	{
 		return false;
 	}
@@ -29,35 +28,67 @@ bool FShadowAtlas::Init(uint32 InAtlasSize, uint32 InTilesize)
 	}
 
 	AtlasSize = InAtlasSize;
-	TileSize = InTilesize;
-	TilesPerRow = AtlasSize / TileSize;
-	NextTile = 0;
+	ResetAllocations();
 	return true;
 }
 
 void FShadowAtlas::ResetAllocations()
 {
-	NextTile = 0;
-	LastResolutionScale = 1.0f;
+	Shelves.Reset();
+	UsedHeight = 0;
+	LastResolution = DefaultShadowResolution;
 }
 
-// Should be called in order of decreasing ResolutionScale
-bool FShadowAtlas::Allocate(float ResolutionScale, FShadowAtlasAllocation* OutAllocation)
+// Should be called in order of decreasing Resolution
+// Shelf packing algorithm (First-fit)
+bool FShadowAtlas::Allocate(uint32 Resolution, FShadowAtlasAllocation* OutAllocation)
 {
 	assert(OutAllocation);
-	assert(ResolutionScale <= LastResolutionScale);
-	LastResolutionScale = ResolutionScale;
+	assert(Resolution <= LastResolution);
+	LastResolution = Resolution;
 
-	if (TilesPerRow == 0 || NextTile >= TilesPerRow * TilesPerRow)
+	assert(Resolution > 0 && Resolution <= AtlasSize);
+
+	// Select the first shelf that can fit the tile
+	for (FShelf& Shelf : Shelves)
 	{
+		if (Resolution > Shelf.Height ||
+			Resolution > AtlasSize - Shelf.NextX)
+		{
+			continue;
+		}
+
+		*OutAllocation = {
+			.X = Shelf.NextX,
+			.Y = Shelf.Y,
+			.Width = Resolution,
+			.Height = Resolution
+		};
+
+		Shelf.NextX += Resolution;
+		return true;
+	}
+
+	// Create a new shelf if no existing shelf can fit the tile
+	if (Resolution > AtlasSize - UsedHeight)
+	{
+		// No more space in the atlas
 		return false;
 	}
 
-	OutAllocation->X = (NextTile % TilesPerRow) * TileSize;
-	OutAllocation->Y = (NextTile / TilesPerRow) * TileSize;
-	OutAllocation->Width = TileSize * ResolutionScale;
-	OutAllocation->Height = TileSize * ResolutionScale;
+	Shelves.Add(FShelf{
+		.Y = UsedHeight,
+		.Height = Resolution,
+		.NextX = Resolution
+	});
 
-	NextTile++;
+	*OutAllocation = {
+		.X = 0,
+		.Y = UsedHeight,
+		.Width = Resolution,
+		.Height = Resolution
+	};
+
+	UsedHeight += Resolution;
 	return true;
 }
