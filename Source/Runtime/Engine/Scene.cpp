@@ -231,6 +231,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		FLightShadowData Local{};
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
+		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
 
 		switch (LightComponent->GetLightType())
 		{

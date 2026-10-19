@@ -24,6 +24,11 @@ void FDirectionalLightSceneProxy::GetShadowBasis(FVector& OutForward, FVector& O
 	FTransform Transform;
 	Transform.Rotation = Dir->GetWorldRotation();
 	
+	OutForward = Transform.GetForward();
+	OutRight = Transform.GetRight();
+	OutUp = Transform.GetUp();
+
+	/*
 	const FVector Forward = Transform.GetForward();
     const FVector Right = Transform.GetRight();
     const FVector Up = Transform.GetUp();
@@ -40,4 +45,5 @@ void FDirectionalLightSceneProxy::GetShadowBasis(FVector& OutForward, FVector& O
 	LightProjection = FMatrix::MakeOrthographic(Size, Size, 0, Depth);
 
 	return LightView * LightProjection;
+	*/
 }
