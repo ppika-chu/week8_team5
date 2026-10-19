@@ -223,7 +223,8 @@ void FShadowRenderer::SetParameters(
 					Allocation.Width * InvAtlasSize,
 					Allocation.Height * InvAtlasSize
 				},
-				.DepthBias = Light.DepthBias
+				.DepthBias = Light.DepthBias,
+				.Depth = Data.Depth,
 				});
 
 			ShadowAllocations.Add(Allocation);

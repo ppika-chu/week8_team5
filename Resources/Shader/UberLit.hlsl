@@ -128,7 +128,8 @@ struct FShadowInfo
     float2 AtlasOffset;
     float2 AtlasScale;
     float DepthBias;
-    float3 Padding;
+    float Depth;
+    float2 Padding;
 };
 
 struct FLightShadowRange
