@@ -2,6 +2,9 @@
 
 #include "Core/Types.h"
 #include "Math/EngineMath.h"
+#include "Core/EngineString.h"
+#include "Serialization/StructuredArchive.h"
+#include "Serialization/StructuredArchiveSlots.h"
 
 struct FColor;
 struct FLinearColor;

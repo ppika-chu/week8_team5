@@ -208,6 +208,9 @@ void FShadowRenderer::SetParameters(
 			{
 				Range.Offset =
 					static_cast<uint32>(ShadowInfos.Num());
+
+				Range.BlendWidth = Light.BlendWidth;
+				Range.bDebugCascades = Light.bDebugCascades;
 			}
 
 			ShadowInfos.Add(FShadowInfo{
@@ -220,7 +223,8 @@ void FShadowRenderer::SetParameters(
 					Allocation.Width * InvAtlasSize,
 					Allocation.Height * InvAtlasSize
 				},
-				.DepthBias = Light.DepthBias
+				.DepthBias = Light.DepthBias,
+				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
 				});
 
 			ShadowAllocations.Add(Allocation);

@@ -321,9 +321,11 @@ void FRenderDevice::CreateStates()
 		// ShadowDepth
 		Desc.FillMode = D3D11_FILL_SOLID;
 		Desc.CullMode = D3D11_CULL_BACK;
+
 		// 아래는 Parameter Tuning 필요
-		Desc.DepthBias = 1000;
-		Desc.SlopeScaledDepthBias = 1.5f;
+		Desc.DepthClipEnable = FALSE; 		// Near 앞쪽 Caster의 깊이를 0으로 눌러 기록 (Pancaking)
+		Desc.DepthBias = 30;
+		Desc.SlopeScaledDepthBias = 1.0f;
 		Desc.DepthBiasClamp = 0.0f;
 
 		Device->CreateRasterizerState(&Desc, RasterizerStates[(uint8)ERasterizerState::ShadowDepth].GetAddressOf());

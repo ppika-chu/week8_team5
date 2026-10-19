@@ -6,21 +6,28 @@
 
 class FRenderer;
 
+// 맵 한 장의 LightVP
 struct FShadowData
 {
 	FMatrix LightViewProj;
+	float Depth = 0.0f;
+	float Width = 0.0f;
 };
 
 // Data delivered from FScene
+// Light 한 개당 
 struct FLightShadowData
 {
 	uint32 LightSlotIndex;		// Index for LightShadowRanges
 								// Slot 0 is reserved for directional Light.
-	TArray<FShadowData> Maps;
+	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
 	float DepthBias;
 	float ResolutionScale = 1.0f;
+	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
+	uint32 bDebugCascades = 0;		// Cascade Debug 용
 };
  
+// 맵 한 장의 Atlas 정보
 struct alignas(16) FShadowInfo
 {
 	FMatrix LightViewProj;
@@ -28,14 +35,26 @@ struct alignas(16) FShadowInfo
 	FVector2 AtlasScale;
 
 	float DepthBias;
-	float Padding[3];
+	float PrescaledTangentTheta;
+	float FShadowInfo_padding[2];
+};
+
+// Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
+struct FShadowSettings
+{
+	float  Distance     = 50.0f;
+	uint32 NumCascades  = 1;
+	float  SplitLambda  = 0.7f;
+	float  BlendWidth   = 0.1f;
+	bool   bDebugCascades = false;
 };
 
 struct alignas(16) FLightShadowRange
 {
 	uint32 Offset;
 	uint32 Count;
-	uint32 Padding[2];
+	float BlendWidth;
+	uint32 bDebugCascades;
 };
 
 class FShadowRenderer
@@ -73,4 +92,7 @@ private:
 	TArray<FLightShadowRange> LightShadowRanges{};		
 	TArray<FShadowInfo> ShadowInfos{};
 	TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
+
+	const float HalfDirectionalLightSourceAngularDiameterRad = 0.0046748644f;
+	const float DirectionalLightSourceTangentTheta = tan(HalfDirectionalLightSourceAngularDiameterRad);
 };

@@ -129,15 +129,15 @@ struct FShadowInfo
     float2 AtlasScale;
     float DepthBias;
     float PrescaledTangentTheta;
-    float ViewZLength; // 지금은 directional light를 위한 변수
-    float FShadowInfo_padding;
+    float2 FShadowInfo_padding;
 };
 
 struct FLightShadowRange
 {
     uint Offset;
     uint Count;
-    uint2 Padding;
+    float BlendWidth;
+    uint bDebugCascades;
 };
 
 Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
@@ -153,40 +153,40 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 #define CASTER_SEARCH_COUNT 16
 #define CASTER_SAMPLE_COUNT 32
-const float2 PoissonDisk[32] =
+static const float2 PoissonDisk[32] =
 {
-    float2(-0.94201624, -0.39906216),
-    float2(0.94558609, -0.76890725),
-    float2(-0.09418410, -0.92938870),
-    float2(0.34495938, 0.29387760),
-    float2(-0.91588581, 0.45771432),
-    float2(-0.36885672, -0.59391560),
-    float2(-0.21444538, 0.58169124),
-    float2(0.21396971, 0.71632737),
-    float2(0.14517782, -0.89163759),
-    float2(0.77199182, -0.54098940),
-    float2(0.74344331, 0.47479805),
-    float2(-0.52329040, -0.40813896),
-    float2(-0.54061840, -0.84076041),
-    float2(0.11587961, -0.47395784),
-    float2(0.73387539, 0.13610810),
-    float2(-0.16568006, 0.28951076),
-    float2(0.29347372, -0.25450444),
-    float2(-0.47137415, 0.84261900),
-    float2(0.04688114, 0.11199968),
-    float2(-0.64670003, 0.41320398),
-    float2(-0.01723472, -0.14091361),
-    float2(0.47144005, -0.64096510),
-    float2(0.46977828, 0.91652441),
-    float2(-0.40773016, 0.13437238),
-    float2(-0.11189914, 0.88775164),
-    float2(0.44046342, 0.57549924),
-    float2(-0.84226143, -0.11475760),
-    float2(0.29200342, -0.05948252),
-    float2(-0.41221237, -0.00743513),
-    float2(0.50645125, -0.15044230),
-    float2(0.09115263, 0.41349834),
-    float2(-0.15655446, -0.73037607)
+    float2(0.03586579, -0.59705367),
+    float2(-0.23044534, 0.87454343),
+    float2(-0.66339939, 0.46301572),
+    float2(-0.35899683, -0.33978122),
+    float2(0.56808130, -0.61531311),
+    float2(0.77020037, 0.45271065),
+    float2(0.31040800, 0.20762513),
+    float2(0.93493649, -0.03457706),
+    float2(-0.40942175, 0.06790063),
+    float2(-0.11239377, -0.91544888),
+    float2(0.23295829, 0.94751021),
+    float2(0.08970381, -0.17057817),
+    float2(-0.13597787, 0.38841689),
+    float2(0.52597640, -0.24154734),
+    float2(-0.86081911, -0.10926739),
+    float2(-0.58368362, -0.74310095),
+    float2(-0.71432519, 0.14127773),
+    float2(-0.37569550, -0.59557831),
+    float2(0.30426721, -0.83233358),
+    float2(-0.51594125, 0.71216759),
+    float2(0.60539985, -0.00120244),
+    float2(0.08039493, 0.71460868),
+    float2(0.58907444, 0.73757767),
+    float2(0.78857418, -0.43640529),
+    float2(-0.70777108, -0.50342177),
+    float2(-0.55752157, -0.15186224),
+    float2(-0.04242211, 0.13067769),
+    float2(-0.22741851, -0.11848174),
+    float2(0.59583200, 0.24992236),
+    float2(0.29563006, 0.47243108),
+    float2(0.34038874, -0.43836685),
+    float2(-0.39910329, 0.48008842)
 };
 
 
@@ -276,6 +276,97 @@ uint GetCascadeNo()
 }
 
 // return value : 통과율
+// 월드 좌표 -> 맵 UV (0 ~ 1), uv 밖이거나 near/far 바깥이면 false
+bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out float OutDepth)
+{
+    const float4 Clip = mul(float4(WorldPos, 1.0f), LightVP);
+    OutUV = 0.0f;
+    OutDepth = 0.0f;
+    if (Clip.w <= 0.0f)
+        return false;
+    const float3 Ndc = Clip.xyz / Clip.w;
+    OutUV = float2(Ndc.x * 0.5f + 0.5f, -Ndc.y * 0.5f + 0.5f);
+    OutDepth = Ndc.z;
+    return all(OutUV >= 0.0f) && all(OutUV <= 1.0f);
+}
+
+// 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
+float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY)
+{
+    const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
+    float2 SearchCasterRadius = ReceiverUV.z * Info.PrescaledTangentTheta * Info.AtlasScale.xy;
+    float3 DuvDx = mul(float4(WorldPosDDX, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
+    float3 DuvDy = mul(float4(WorldPosDDY, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
+    float Det = DuvDx.x * DuvDy.y - DuvDx.y * DuvDy.x;
+    float2x2 InvMatrix = float2x2(0, 0, 0, 0);
+#if !LIGHTING_MODEL_GOURAUD
+    //if (abs(Det) >= 1e-9f * Info.AtlasScale.x)
+        if (Det != 0.0f)
+            InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
+#endif
+    uint TexelCountX, TexelCountY;
+    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
+    float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
+    float2 MaxSampleRadius = 40.0f * TexelStep;
+    SearchCasterRadius = min(SearchCasterRadius, MaxSampleRadius);
+    float2 TileMinUV = Info.AtlasOffset;
+    float2 TileMaxUV = Info.AtlasOffset + Info.AtlasScale;
+    float2 MapDu = float2(TexelStep.x, 0.0f);
+    float2 MapDv = float2(0.0f, TexelStep.y);
+    float2 DxyDu = mul(MapDu, InvMatrix);
+    float2 DxyDv = mul(MapDv, InvMatrix);
+    float BlockAverage = 0.0f;
+    uint DepthCount = 0;
+    for (uint i = 0; i < CASTER_SEARCH_COUNT; ++i)
+    {
+        float2 OffsetUV = SearchCasterRadius * PoissonDisk[i];
+        float2 SampleUV = ReceiverUV.xy + OffsetUV;
+        if (any(SampleUV < TileMinUV) || any(SampleUV >= TileMaxUV))
+            continue;
+        float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
+        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, SampleUV, 0);
+        if (DepthSampled < ReceiverDepth)
+        {
+            BlockAverage += DepthSampled;
+            ++DepthCount;
+        }
+    }
+    float PercentLit = 1.0f;
+    if (DepthCount > 0)
+    {
+        BlockAverage /= DepthCount;
+        float2 BlockerRadius = max(0.75f * min(Info.PrescaledTangentTheta * (ReceiverUV.z - BlockAverage) * Info.AtlasScale.xy, MaxSampleRadius), 1.5f * TexelStep);
+        PercentLit = 0.0f;
+        uint SampleCount = 0;
+        for (uint j = 0; j < CASTER_SAMPLE_COUNT; ++j)
+        {
+            float2 OffsetUV = BlockerRadius * PoissonDisk[j];
+            float2 SampleUV = ReceiverUV.xy + OffsetUV;
+            if (any(SampleUV < TileMinUV + 0.5f * TexelStep) || any(SampleUV > TileMaxUV - 0.5f * TexelStep))
+                continue;
+            float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
+            PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, SampleUV, ReceiverDepth);
+            ++SampleCount;
+        }
+        PercentLit = SampleCount > 0 ? PercentLit / SampleCount : 1.0f;
+    }
+    return PercentLit;
+}
+
+// 픽셀을 cascade index로 반환 (debug용)
+uint FindCascadeIndex(float3 WorldPos)
+{
+    const FLightShadowRange Range = LightShadowRanges[0];
+    for (uint i = 0; i < Range.Count; ++i)
+    {
+        float2 UV; float Depth;
+        if (ProjectToShadowMap(WorldPos, ShadowInfos[Range.Offset + i].LightViewProjection, UV, Depth))
+            return i;
+    }
+    // 모든 Cascade 밖이면 Count 반환
+    return Range.Count;
+}
+
 float CalcDirectionalShadow(float3 WorldPos)
 {
     // Disabled shadow is not included in ShadowInfos.
@@ -286,77 +377,48 @@ float CalcDirectionalShadow(float3 WorldPos)
     const FLightShadowRange Range = LightShadowRanges[0];
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light
-    
-    //uint CascadeNo = GetCascadeNo();
-    int CascadeNo = -1;
-    if (CascadeNo == -1)
-        return 1.0f;
-    
-    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset + CascadeNo];
 
-    float FrustumDepth = DirectionalShadowInfo.Depth;
-    float4 ReceiverUV = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection) * float4(0.5f, -0.5f, 1.0f, 1.0f) + float4(0.5f, 0.5f, 0.0f, 0.0f);
-    ReceiverUV = ReceiverUV * float4(DirectionalShadowInfo.AtlasScale, 1.0f, 1.0f) + float4(DirectionalShadowInfo.AtlasOffset, 0.0f, 0.0f);
-    
-    
-    float StandardizedViewDepth = ReceiverUV.z * FrustumDepth;
-    
-    float2 SearchCasterRadius = StandardizedViewDepth * DirectionalShadowInfo.PrescaledTangentTheta * DirectionalShadowInfo.AtlasScale.xy;
+    // 캐스케이드 선택 전에 공통 월드 위치를 미분한다. Gouraud의 VS에서는 미분을 사용할 수 없다.
+#if LIGHTING_MODEL_GOURAUD
+    const float3 WorldPosDDX = 0.0f;
+    const float3 WorldPosDDY = 0.0f;
+#else
+    const float3 WorldPosDDX = ddx(WorldPos);
+    const float3 WorldPosDDY = ddy(WorldPos);
+#endif
 
-    float3 DuvDx = ddx(ReceiverUV);
-    float3 DuvDy = ddy(ReceiverUV);
-    
-    float Det = DuvDx.x * DuvDy.y - DuvDx.y * DuvDy.x;
-    float2x2 InvMatrix;
-    if (abs(Det) < 1e-9f * DirectionalShadowInfo.AtlasScale.x)
+    // 앞쪽 Cascade부터 검색
+    for (uint i = 0; i < Range.Count; ++i)
     {
-       InvMatrix = float2x2(0, 0, 0, 0);
-       // return 1.0f;
+        const FShadowInfo Info = ShadowInfos[Range.Offset + i];
+        float2 UV; float Depth;
+
+        // 1) 밖이면 다음 Cascade 검사
+        if (!ProjectToShadowMap(WorldPos, Info.LightViewProjection, UV, Depth))
+            continue;
+        
+        // 그림자면 0 빛이면 1
+        const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY);
+
+        // 현재 위치에서 가장자리 위치까지 거리
+        const float EdgeDist = min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y));
+
+        // 2) 충분히 UV 안쪽이거나 다음 Cascade가 없으면 그대로 반환
+        if (EdgeDist >= Range.BlendWidth || i + 1 >= Range.Count)
+            return Shadow;
+
+        // 3) Blend 하기 위해 다음 Cascade 구하기
+        const FShadowInfo NextInfo = ShadowInfos[Range.Offset + i + 1];
+        float2 NextUV; float NextDepth;
+        if (!ProjectToShadowMap(WorldPos, NextInfo.LightViewProjection, NextUV, NextDepth))
+            return Shadow;      // 혹시라도 이 점을 표현하지 않으면 그대로 반환
+        
+        // lerp(A, B, t) : t가 0 이면 A, 1이면 B
+        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY), Shadow, EdgeDist / Range.BlendWidth);
     }
-    else
-    {
-        InvMatrix = float2x2(DuvDy.y, -DuvDy.x, -DuvDx.y, DuvDx.x) / Det;
-    }
-    
-    float TexelCountX; float TexelCountY;
-    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
-    float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
-    
-    float2 MapDu = float2(TexelStep.x, 0.0f);
-    float2 MapDv = float2(0.0f, TexelStep.y);
-    
-    float2 DxyDu = mul(MapDu, InvMatrix);
-    float2 DxyDv = mul(MapDv, InvMatrix);
-    
-    float BlockAverage = 0.0f;
-    uint DepthCount = 0;
-    for (uint i = 0; i < CASTER_SEARCH_COUNT; ++i)
-    {
-        float ReceiverDepth = PoissonDisk[i].x * SearchCasterRadius.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * SearchCasterRadius.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
-        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, ReceiverUV.xy + SearchCasterRadius * PoissonDisk[i], 0);
-        if (DepthSampled < ReceiverDepth)
-        {
-            BlockAverage += DepthSampled;
-            ++DepthCount;
-        }
-    }
-    
-    if (DepthCount > 0)
-    {
-        BlockAverage /= DepthCount;
-        float2 BlockerRadius = DirectionalShadowInfo.PrescaledTangentTheta * FrustumDepth * (ReceiverUV.z - BlockAverage) * DirectionalShadowInfo.AtlasScale.xy;
-        float BlockAverage = 0.0f;
-        for (uint i = 0; i < CASTER_SAMPLE_COUNT; ++i)
-        {
-            float ReceiverDepth = PoissonDisk[i].x * BlockerRadius.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * BlockerRadius.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
-            BlockAverage += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, ReceiverUV.xy + BlockerRadius * PoissonDisk[i], ReceiverDepth);
-        }
-        return BlockAverage / CASTER_SAMPLE_COUNT;
-    }
-    else
-    {
-        return 1.0f;
-    }
+
+    // 모든 Cascade 밖이면 
+    return 1.0;
 }
 
 float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
@@ -666,6 +728,20 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 #elif LIGHTING_MODEL_GOURAUD
     DiffuseLighting += Input.VertexDiffuse;
 #endif
+
+    // Cascade 디버그
+    if (LightShadowRanges[0].bDebugCascades != 0)
+    {
+        static const float3 CascadeColors[5] = {
+            // 연한 빨강, 연한 초록, 연학 파랑, 연한 노랑, 흰색 (Cascade 없는 곳은 원래 색)
+            float3(1.0f, 0.3f, 0.3f), float3(0.3f, 1.0f, 0.3f), float3(0.3f, 0.3f, 1.0f), float3(1.0f, 1.0f, 0.3f), float3(1.0f, 1.0f, 1.0f)
+        };
+        // 틴트 추가
+        const uint Index = FindCascadeIndex(Input.WorldPos);
+        // 모든 Cascade 밖(Index == Count)이면 Cascade 수와 상관없이 흰색
+        const float3 Tint = (Index >= LightShadowRanges[0].Count) ? float3(1.0f, 1.0f, 1.0f) : CascadeColors[Index];
+        Albedo.rgb *= Tint;
+    }
 
     return float4(Albedo.rgb * DiffuseLighting + SpecularLighting, Alpha);
 #endif
