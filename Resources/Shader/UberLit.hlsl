@@ -24,6 +24,8 @@
 #define LIGHTING_MODEL_LAMBERT 1
 #endif
 
+#define MAX_DIRECTIONAL_LIGHTS 1
+
 // 아래 구조체와 cbuffer Lighting은 Renderer.h의 FLightingConstants와 바이트 단위로 같아야 한다.
 struct FAmbientLightInfo
 {
@@ -226,7 +228,9 @@ float CalcDirectionalShadow(float3 WorldPos)
 {
     // Disabled shadow is not included in ShadowInfos.
     // if (!bShadowEnabled) return 1.0f;
-    // TEMP
+    
+    // Currently, we only support one directional light,
+    // so we reserve the slot 0 for directional light shadow info.
     const FLightShadowRange Range = LightShadowRanges[0];
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light

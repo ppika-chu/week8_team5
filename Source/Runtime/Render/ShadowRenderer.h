@@ -6,17 +6,18 @@
 
 class FRenderer;
 
-// Data delivered from FScene
 struct FShadowData
 {
 	FMatrix LightViewProj;
-	float DepthBias;
 };
 
+// Data delivered from FScene
 struct FLightShadowData
 {
-	uint32 LightIndex;			// Index for LightShadowRanges
+	uint32 LightSlotIndex;		// Index for LightShadowRanges
+								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;
+	float DepthBias;
 };
  
 struct alignas(16) FShadowInfo
@@ -65,9 +66,11 @@ private:
 	//FShadowConstants ShadowData{};
 
 	TUniquePtr<FStructuredBuffer> ShadowInfosBuffer{};
+	// [Directional0, Local0, Local1, ... , LocalN]
+	// Size = MaxDirectionalLights + MaxLocalLights
 	TUniquePtr<FStructuredBuffer> LightShadowRangesBuffer{};
 
-	TArray<FLightShadowRange> LightShadowRanges{};
+	TArray<FLightShadowRange> LightShadowRanges{};		
 	TArray<FShadowInfo> ShadowInfos{};
 	TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
 };

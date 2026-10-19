@@ -191,19 +191,18 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		{
 			FShadowData ShadowData{
 				.LightViewProj = Proxy->GetShadowViewProjection(Center, Depth, Size),
-				.DepthBias = Proxy->GetLightComponent()->GetShadowBias()
 			};
 
 			FLightShadowData Directional{};
-			Directional.LightIndex = 0;
+			Directional.LightSlotIndex = 0;
 			Directional.Maps.Add(ShadowData);
+			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
 
 			Lights.Add(Directional);
 		}
 		break;                                            // 셰이더는 하나만 받음
 	}
 	// Light 없으면 bShadowEnabled = 0
-	ShadowRenderer->SetParameters(Lights, 2);
 
 	for (FLocalLightSceneProxy* Proxy : LocalLightProxies)
 	{
@@ -211,60 +210,23 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer)
 		Proxy->GetLightShaderParameters(P);
 		if (!Proxy->IsVisible())
 			P.Radius = 0.0f;                              // 칸은 유지하고 영향만 없앤다
-			/*FTransform Transform;
-			Transform.Rotation = Spot->GetWorldRotation();
-			const FLinearColor Color(Spot->GetLightColor());
+		
+		// TODO: If the light type is point, 
+		// create 6 shadow data for each face of the cube map,
+		// and add them to the light shadow data.
+		FShadowData ShadowData{
+			.LightViewProj = Proxy->GetShadowViewProjection(90, 0.1f, 10.0f),
+		};
 
-			Constants.SpotLights[Constants.NumSpotLights].Color = FVector(Color.R, Color.G, Color.B);
-			Constants.SpotLights[Constants.NumSpotLights].Direction = Transform.GetForward();
-			Constants.SpotLights[Constants.NumSpotLights].FalloffExponent = Spot->GetFalloff();
-			Constants.SpotLights[Constants.NumSpotLights].Intensity = Spot->GetIntensity();
-			Constants.SpotLights[Constants.NumSpotLights].Position = Spot->GetWorldLocation();
-			Constants.SpotLights[Constants.NumSpotLights].Radius = Spot->GetAttenuationRadius();
-			const float SafeOuterAngle = FMath::Clamp(Spot->GetOuterConeAngle(), 0.0f, 89.0f);
-			const float SafeInnerAngle = FMath::Clamp(Spot->GetInnerConeAngle(), 0.0f, SafeOuterAngle);
-			Constants.SpotLights[Constants.NumSpotLights].InnerConeCos = std::cos(FMath::DegreesToRadians(SafeInnerAngle));
-			Constants.SpotLights[Constants.NumSpotLights].OuterConeCos = std::cos(FMath::DegreesToRadians(SafeOuterAngle));
-			Constants.NumSpotLights++;
-		}
-		else if (UPointLightComponent* Point = Cast<UPointLightComponent>(Light))
-		{
-			const FLinearColor Color(Point->GetLightColor());
-			FPointLightInfo Info{};
-			Info.Position = Point->GetWorldLocation();
-			Info.Radius = Point->GetAttenuationRadius();
-			Info.Color = FVector(Color.R, Color.G, Color.B);
-			Info.Intensity = Point->GetIntensity();
-			Info.FalloffExponent = Point->GetFalloff();
-			PointLights.Add(Info);
-		}
-		else if (URectLightComponent* Rect = Cast<URectLightComponent>(Light))
-		{
-			if (Constants.NumRectLights >= MaxRectLights)
-				continue;
-
-			FTransform Transform;
-			Transform.Rotation = Rect->GetWorldRotation();
-			const FLinearColor Color(Rect->GetLightColor());
-
-			FRectLightInfo& Info = Constants.RectLights[Constants.NumRectLights++];
-			Info.Position   = Rect->GetWorldLocation();
-			Info.Radius     = Rect->GetAttenuationRadius();
-			Info.Color      = FVector(Color.R, Color.G, Color.B);
-			Info.Intensity  = Rect->GetIntensity();
-			Info.Direction  = Transform.GetForward();
-			Info.Right      = Transform.GetRight();
-			Info.HalfWidth  = Rect->GetWidth() * 0.5f;
-			Info.HalfHeight = Rect->GetHeight() * 0.5f;
-
-			const float AngleRad = FMath::DegreesToRadians(FMath::Clamp(Rect->GetBarnDoorAngle(), 0.0f, 90.0f));
-			Info.BarnDoorCos    = std::cos(AngleRad);
-			Info.BarnDoorSin    = std::sin(AngleRad);
-			Info.BarnDoorLength = std::max(Rect->GetBarnDoorLength(), 0.0f);
-		}*/
+		FLightShadowData Local{};
+		Local.LightSlotIndex = MaxDirectionalLights + Proxy->PackedIndex;
+		Local.Maps.Add(ShadowData);
+		Local.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+		Lights.Add(Local);
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
+	ShadowRenderer->SetParameters(Lights, MaxDirectionalLights + MaxLocalLights);
 }
 
 void FScene::AddFogInfo(uint32 Id, const FFogInfo& FogInfo)

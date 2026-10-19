@@ -27,14 +27,14 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	LightShadowRangesBuffer = RenderCommand::CreateDynamicStructuredBuffer(
 		sizeof(FLightShadowRange),
-		MaxLocalLights);
+		MaxDirectionalLights + MaxLocalLights);
 
 	if (!LightShadowRangesBuffer || !LightShadowRangesBuffer->GetSRV())
 	{
 		return false;
 	}
 
-	if (!ShadowAtlas.Init(2048, 1024))
+	if (!ShadowAtlas.Init(16384, 2048))
 	{
 		return false;
 	}
@@ -64,7 +64,7 @@ void FShadowRenderer::SetParameters(
 
 	for (const FLightShadowData& Light : Lights)
 	{
-		if (Light.LightIndex >= SlotCount)
+		if (Light.LightSlotIndex >= SlotCount)
 			continue;
 
 		const uint32 MapCount = static_cast<uint32>(Light.Maps.Num());
@@ -81,6 +81,7 @@ void FShadowRenderer::SetParameters(
 			.Offset = static_cast<uint32>(ShadowInfos.Num()),
 		};
 
+		const float DepthBias = Light.DepthBias;
 		for (const FShadowData& Data : Light.Maps)
 		{
 			FShadowAtlasAllocation Allocation{};
@@ -103,7 +104,7 @@ void FShadowRenderer::SetParameters(
 					Allocation.Width * InvAtlasSize,
 					Allocation.Height * InvAtlasSize
 				},
-				.DepthBias = Data.DepthBias
+				.DepthBias = DepthBias
 			};
 
 			ShadowInfos.Add(ShadowInfo);
@@ -113,7 +114,7 @@ void FShadowRenderer::SetParameters(
 		Range.Count = static_cast<uint32>(
 			ShadowInfos.Num() - Range.Offset);
 
-		LightShadowRanges[Light.LightIndex] = Range;
+		LightShadowRanges[Light.LightSlotIndex] = Range;
 	}
 
 	RenderCommand::UpdateBufferData(
