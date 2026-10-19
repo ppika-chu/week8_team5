@@ -164,15 +164,6 @@ void FShadowRenderer::SetParameters(
 			MinShadowAtlasSize);
 
 		while (CandidateSize <= MaxShadowAtlasSize)
-		FLightShadowRange Range{
-			.Offset = static_cast<uint32>(ShadowInfos.Num()),
-			.BlendWidth = Light.BlendWidth,
-			.bDebugCascades = Light.bDebugCascades,
-		};
-
-		const float DepthBias = Light.DepthBias;
-		const uint32 Resolution = static_cast<uint32>(Light.ResolutionScale * DefaultShadowResolution);
-		for (const FShadowData& Data : Light.Maps)
 		{
 			if (FShadowAtlas::TryPack(
 				Resolutions,
@@ -217,6 +208,9 @@ void FShadowRenderer::SetParameters(
 			{
 				Range.Offset =
 					static_cast<uint32>(ShadowInfos.Num());
+
+				Range.BlendWidth = Light.BlendWidth;
+				Range.bDebugCascades = Light.bDebugCascades;
 			}
 
 			ShadowInfos.Add(FShadowInfo{

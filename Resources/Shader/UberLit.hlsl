@@ -126,7 +126,6 @@ struct FShadowInfo
 {
     matrix LightViewProjection;
     float2 AtlasOffset;
-    float2 AtlasOffset;
     float2 AtlasScale;
     float DepthBias;
     float3 Padding;
@@ -282,24 +281,6 @@ float CalcDirectionalShadow(float3 WorldPos)
     const FLightShadowRange Range = LightShadowRanges[0];
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light
-    
-    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset];
-
-    const float4 LightClip = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection);
-    const float3 Ndc = LightClip.xyz / LightClip.w;
-    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
-    const float2 AtlasUV = UV * DirectionalShadowInfo.AtlasScale + DirectionalShadowInfo.AtlasOffset;
-
-    // any() : 벡터 성분 중 하나라도 참이면 true
-    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f)
-        return 1.0f; // Shadow Map 밖이면 빛을 받는 것으로 간주
-
-    uint Width, Height;
-
-    ShadowMapAtlas.GetDimensions(Width, Height); // 텍스처 크기(텍셀 개수) 돌려주는 함수
-    const uint2 Texel = min(uint2(AtlasUV * float2(Width, Height)), uint2(Width - 1, Height - 1)); // UV = 1.0 이면 텍셀 밖이므로 clamp
-    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
-    return (Ndc.z - DirectionalShadowInfo.DepthBias > MapDepth) ? 0.0f : 1.0f;
 
     // 앞쪽 Cascade부터 검색
     for (uint i = 0; i < Range.Count; ++i)
