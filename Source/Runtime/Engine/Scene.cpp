@@ -201,10 +201,12 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			FLightShadowData Directional{};
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
 
 			// Todo : Cascade 구간 분할 루프. 지금은 1장
+			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			Directional.Maps.Add(FShadowData{
-				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, ShadowRenderer->GetTileSize()),
+				.LightViewProj = FitCascade(Corners, Forward, Right, Up, Bounds, Resolution),
 			});
 
 			Lights.Add(Directional);
@@ -229,11 +231,12 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		Local.LightSlotIndex = MaxDirectionalLights + Proxy->PackedIndex;
 		Local.Maps.Add(ShadowData);
 		Local.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+		Local.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
 		Lights.Add(Local);
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
-	ShadowRenderer->SetParameters(Lights, MaxDirectionalLights + MaxLocalLights);
+	ShadowRenderer->SetParameters(std::move(Lights), MaxDirectionalLights + MaxLocalLights);
 }
 
 const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const

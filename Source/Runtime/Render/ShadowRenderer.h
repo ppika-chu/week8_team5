@@ -18,6 +18,7 @@ struct FLightShadowData
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;
 	float DepthBias;
+	float ResolutionScale = 1.0f;
 };
  
 struct alignas(16) FShadowInfo
@@ -43,7 +44,7 @@ public:
 	bool Init(FRenderer* InRenderer);
 
 	void SetParameters(
-		const TArray<FLightShadowData>& Lights,
+		TArray<FLightShadowData>&& Lights,
 		uint32 LightSlotCount);
 	void BeginShadowPass();
 	void OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex);
@@ -56,8 +57,6 @@ public:
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
 	//const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
-	uint32 GetTileSize() const { return ShadowAtlas.GetTilesize(); }
-
 private:
 	FRenderer* Renderer = nullptr;
 
