@@ -128,7 +128,8 @@ struct FShadowInfo
     float2 AtlasOffet;
     float2 AtlasScale;
     float DepthBias;
-    float3 Padding;
+    float PrescaledTangentTheta;
+    float2 Padding;
 };
 
 struct FLightShadowRange
@@ -141,40 +142,12 @@ struct FLightShadowRange
 Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
 StructuredBuffer<FShadowInfo> ShadowInfos : register(t14);
 StructuredBuffer<FLightShadowRange> LightShadowRanges : register(t15);
+SamplerState PointSampler : register(s1);
 
 StructuredBuffer<FLightRenderParameters> LocalLights : register(t10);
 // 셀마다 [개수][라이트 번호 x MAX_LIGHTS_PER_CELL] 형태로 CELL_STRIDE칸씩 이어져 있다.
 StructuredBuffer<uint> CellLightIndices : register(t12);
 
-
-cbuffer ShadowConstants : register(b6)
-{
-    matrix DirectionalLightRotation;
-    float ShadowBias;
-    uint bShadowEnabled;
-    float CascadeShadowMapReferenceHeight; // 월드 원점과 레퍼런스 광원 평면의 거리로 정의. 낮을수록 좋지만 웬만하면 모든 리시버/캐스터의 광원 뷰 시점 높이보다 높아야 함(자연스럽게, 모든 캐스케이드들의 높이는 웬만하면 레퍼런스보다 낮게 될 것). 값 변동 시 그 순간에 그림자 아티팩트 발생 가능성 있음.
-// 따라서 이전 프레임에 비해 '디렉셔널 라이트 방향이 그대로여도 이 값을 바꿀 당위성이 있는 상황(ex: 월드 컨텍스트가 격변함-핵폭탄이 터져 월드의 물체들의 전체적인 높이가 감소. 폭탄이 터져 빛나는 순간에 이 값을 감소시킬 수 있을것임)'이 아니라면, 바꾸지 않아야 함 
-// 위 예시로부터 생각해볼 수 있는 변화 가능 조건으로, 월드 액터 혹은 그들의 렌더링 데이터에 대한 쿼리 구조를 사용해 일련의 높이 정보를 얻고 프러스텀 내에 눈에 띄는 그림자를 만들어내는 리시버가 존재하지 않으면 이용자가 별도의 수동 조작 함수를 호출하지 않고도 변화시킬 수 있을 것임
-// 한편 디렉셔널 라이트의 방향이 변하는 경우의 값 변경 정책 설계는 자유. 정책의 예시로, 그림자의 품질을 최대한 일정하게 유지하고 싶은 월드위치가 있으면 그 위치로부터 레퍼런스 광원 평면의 거리가 일정하도록 설계할 수도 있을 것(다만 방향이 변하는 경우는 리시버/캐스터의 광원 뷰 시점 높이가 변화무쌍할 것은 염두에 두어야 함). 이 경우 매니저 정책 함수에 특정 월드 위치가 영향을 줌
-// 단순하게는 고정 레퍼런스 높이로 시작해볼 수 있을 것
-    
-    float ShadowPadding;
-};
-
-struct FCascadeData
-{
-    matrix LightViewProj;
-    float Size; // xy
-    float Depth;
-    float Bias;
-    float PrescaledTangentTheta; // tan(각반지름) / Length
-    float2 TopLeftUV;
-    float UVScale;
-};
-
-Texture2D<float> CascadeShadowMap : register(t13);     // 0 ~ 1 깊이
-StructuredBuffer<FCascadeData> CascadeDatas : register(t14);
-SamplerState PointSampler : register(s1);
 
 #define CASTER_SEARCH_COUNT 16
 #define CASTER_SAMPLE_COUNT 32
@@ -311,25 +284,20 @@ float CalcDirectionalShadow(float3 WorldPos)
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light
     
-    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset];
+    //uint CascadeNo = GetCascadeNo();
+    int CascadeNo = -1;
+    if (CascadeNo == -1)
+        return 1.0f;
+    
+    const FShadowInfo DirectionalShadowInfo = ShadowInfos[Range.Offset + CascadeNo];
 
-    const float4 LightClip = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection);
-    const float3 Ndc = LightClip.xyz / LightClip.w;
-    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
-    const float2 AtlasUV = UV * DirectionalShadowInfo.AtlasScale + DirectionalShadowInfo.AtlasOffet;
-
-    // any() : 벡터 성분 중 하나라도 참이면 true
-    if (any(UV < 0.0f) || any(UV > 1.0f) || Ndc.z > 1.0f)
-        return 1.0f; // Shadow Map 밖이면 빛을 받는 것으로 간주
-    uint CascadeNo = GetCascadeNo();
+    float4 ReceiverUV = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection) * float4(0.5f, -0.5f, 0.5f, 1.0f) + float4(0.5f, 0.5f, 0.5f, 0.0f);
+    ReceiverUV = ReceiverUV * float4(DirectionalShadowInfo.AtlasScale, 1.0f, 1.0f) + float4(DirectionalShadowInfo.AtlasOffet, 0.0f, 0.0f);
     
-    FCascadeData CascadeData = CascadeDatas[CascadeNo];
     
-    float4 ReceiverUV = mul(float4(WorldPos, 1), CascadeData.LightViewProj) * float4(0.5f, 0.5f, 0.5f, 1.0f) + float4(0.5f, 0.5f, 0.5f, 0.0f);
+    float StandardizedViewDepth = ReceiverUV.w + DirectionalShadowInfo.DepthBias;
     
-    float StandardizedViewDepth = ReceiverUV.w + CascadeData.Bias;
-    
-    float SearchCasterRadius = StandardizedViewDepth * CascadeData.PrescaledTangentTheta;
+    float SearchCasterRadius = StandardizedViewDepth * DirectionalShadowInfo.PrescaledTangentTheta;
 
     float3 DuvDx = ddx(ReceiverUV);
     float3 DuvDy = ddy(ReceiverUV);
