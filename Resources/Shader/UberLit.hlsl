@@ -125,12 +125,12 @@ cbuffer LightGrid : register(b5)
 struct FShadowInfo
 {
     matrix LightViewProjection;
-    float2 AtlasOffet;
+    float2 AtlasOffset;
     float2 AtlasScale;
-    float Depth;
+    float DepthBias;
     float PrescaledTangentTheta;
-    float TexelCountX; // Texelcount X of Atlas
-    float TexelCountY; // Texelcount Y of Atlas
+    float ViewZLength; // 지금은 directional light를 위한 변수
+    float FShadowInfo_padding;
 };
 
 struct FLightShadowRange
@@ -296,7 +296,7 @@ float CalcDirectionalShadow(float3 WorldPos)
 
     float FrustumDepth = DirectionalShadowInfo.Depth;
     float4 ReceiverUV = mul(float4(WorldPos, 1.0f), DirectionalShadowInfo.LightViewProjection) * float4(0.5f, -0.5f, 1.0f, 1.0f) + float4(0.5f, 0.5f, 0.0f, 0.0f);
-    ReceiverUV = ReceiverUV * float4(DirectionalShadowInfo.AtlasScale, 1.0f, 1.0f) + float4(DirectionalShadowInfo.AtlasOffet, 0.0f, 0.0f);
+    ReceiverUV = ReceiverUV * float4(DirectionalShadowInfo.AtlasScale, 1.0f, 1.0f) + float4(DirectionalShadowInfo.AtlasOffset, 0.0f, 0.0f);
     
     
     float StandardizedViewDepth = ReceiverUV.z * FrustumDepth;
@@ -318,8 +318,12 @@ float CalcDirectionalShadow(float3 WorldPos)
         InvMatrix = float2x2(DuvDy.y, -DuvDy.x, -DuvDx.y, DuvDx.x) / Det;
     }
     
-    float2 MapDu = float2(1.0f / DirectionalShadowInfo.TexelCountX, 0.0f);
-    float2 MapDv = float2(0.0f, 1.0f / DirectionalShadowInfo.TexelCountY);
+    float TexelCountX; float TexelCountY;
+    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
+    float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
+    
+    float2 MapDu = float2(TexelStep.x, 0.0f);
+    float2 MapDv = float2(0.0f, TexelStep.y);
     
     float2 DxyDu = mul(MapDu, InvMatrix);
     float2 DxyDv = mul(MapDv, InvMatrix);
@@ -328,7 +332,7 @@ float CalcDirectionalShadow(float3 WorldPos)
     uint DepthCount = 0;
     for (uint i = 0; i < CASTER_SEARCH_COUNT; ++i)
     {
-        float ReceiverDepth = PoissonDisk[i].x * SearchCasterRadius.x * DirectionalShadowInfo.TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * SearchCasterRadius.y * DirectionalShadowInfo.TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
+        float ReceiverDepth = PoissonDisk[i].x * SearchCasterRadius.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * SearchCasterRadius.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
         float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, ReceiverUV.xy + SearchCasterRadius * PoissonDisk[i], 0);
         if (DepthSampled < ReceiverDepth)
         {
@@ -344,7 +348,7 @@ float CalcDirectionalShadow(float3 WorldPos)
         float BlockAverage = 0.0f;
         for (uint i = 0; i < CASTER_SAMPLE_COUNT; ++i)
         {
-            float ReceiverDepth = PoissonDisk[i].x * BlockerRadius.x * DirectionalShadowInfo.TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * BlockerRadius.y * DirectionalShadowInfo.TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
+            float ReceiverDepth = PoissonDisk[i].x * BlockerRadius.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + PoissonDisk[i].y * BlockerRadius.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z;
             BlockAverage += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, ReceiverUV.xy + BlockerRadius * PoissonDisk[i], ReceiverDepth);
         }
         return BlockAverage / CASTER_SAMPLE_COUNT;
@@ -355,8 +359,88 @@ float CalcDirectionalShadow(float3 WorldPos)
     }
 }
 
+float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
+{
+    const float4 LightClip =
+        mul(float4(WorldPos, 1.0f), Info.LightViewProjection);
+    
+    if (LightClip.w <= 0.0f)
+        return 1.0f; // 뒤쪽이면 그림자 없음
+            
+    const float3 Ndc = LightClip.xyz / LightClip.w;
+    const float2 UV = float2((Ndc.x * 0.5 + 0.5), (-Ndc.y * 0.5 + 0.5));
+
+    if (any(UV < 0.0f) || any(UV > 1.0f) || 
+        Ndc.z < 0.0f || Ndc.z > 1.0f)
+        return 1.0f; // Shadow Map 밖이면 빛을 받는 것으로 간주
+    
+    const float2 AtlasUV = UV * Info.AtlasScale + Info.AtlasOffset;
+    
+    uint Width, Height;
+    ShadowMapAtlas.GetDimensions(Width, Height);
+    
+    const float2 AtlasSize = float2(Width, Height);
+
+    const int2 TileMin = int2(round(Info.AtlasOffset * AtlasSize));
+    const int2 TileSize = int2(round(Info.AtlasScale * AtlasSize));
+    const int2 TileMax = TileMin + TileSize - int2(1, 1);
+
+    const int2 Texel = clamp(int2(AtlasUV * AtlasSize), TileMin, TileMax);
+    
+    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
+    
+    return Ndc.z - Info.DepthBias > MapDepth ? 0.0f : 1.0f;
+}
+
+uint GetPointShadowFace(float3 LightToSurface)
+{
+    const float3 A = abs(LightToSurface);
+    
+    if (A.x >= A.y && A.x >= A.z) // X축이 가장 크면 +X/-X 면
+        return LightToSurface.x >= 0.0f ? 0u : 1u; // +X, -X
+    
+    if (A.y >= A.z) // Y축이 가장 크면 +Y/-Y 면
+        return LightToSurface.y >= 0.0f ? 2u : 3u; // +Y, -Y
+    
+    // Z축이 가장 크면 +Z/-Z 면
+    return LightToSurface.z >= 0.0f ? 4u : 5u; // +Z, -Z
+}
+
+float CalcLocalShadow(
+    uint LightIndex,
+    FLightRenderParameters Light,
+    float3 WorldPos)
+{
+    if (Light.Type != LIGHT_TYPE_POINT &&
+        Light.Type != LIGHT_TYPE_SPOT)
+    {
+        return 1.0f;
+    }
+    
+    const FLightShadowRange Range =
+        LightShadowRanges[MAX_DIRECTIONAL_LIGHTS + LightIndex];
+    
+    if (Range.Count == 0)
+        return 1.0f; // 그림자 없는 로컬 라이트
+    
+    uint FaceIndex = 0; // Spot
+    
+    if (Light.Type == LIGHT_TYPE_POINT)
+    {
+        FaceIndex = GetPointShadowFace(WorldPos - Light.Position);
+    }
+    
+    if (FaceIndex >= Range.Count)
+        return 1.0f; // 그림자 맵이 없는 면이면 빛을 받는 것으로 간주
+    
+    const FShadowInfo Info = ShadowInfos[Range.Offset + FaceIndex];
+    return SampleShadowInfo(Info, WorldPos);
+}
+
 // Directional Light의 영향을 구한다
-FLightContribution CalcDirectionalLight(float3 N, float3 V, float InShininess)
+FLightContribution
+    CalcDirectionalLight(
+    float3 N, float3 V, float InShininess)
 {
     const float3 Radiance = Directional.Color * Directional.Intensity;
     return SurfaceShading(N, -Directional.Direction, V, Radiance, InShininess);
@@ -497,9 +581,11 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
     for (uint Index = 0; Index < LightCount; ++Index)
     {
         const uint LightIndex = bUseCellList ? CellLightIndices[CellOffset + 1 + Index] : Index;
-        const FLightContribution LightContribution = CalcLocalLight(LocalLights[LightIndex], N, V, WorldPos, InShininess);
-        Total.Diffuse += LightContribution.Diffuse;
-        Total.Specular += LightContribution.Specular;
+        const FLightRenderParameters Light = LocalLights[LightIndex];
+        const FLightContribution LightContribution = CalcLocalLight(Light, N, V, WorldPos, InShininess);
+        const float Shadow = CalcLocalShadow(LightIndex, Light, WorldPos);
+        Total.Diffuse += LightContribution.Diffuse * Shadow;
+        Total.Specular += LightContribution.Specular * Shadow;
     }
 
     return Total;
