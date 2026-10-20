@@ -123,6 +123,8 @@ public:
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
 	const TArray<uint32>& GetDirtyShadowIndices() const { return DirtyShadowIndices; }
 
+	TArray<FShadowAtlasAllocation> GetShadowMapRects(uint32 LightID) const;
+
 private:
 	FRenderer* Renderer = nullptr;
 	FShadowRenderStats CurrentViewStats{};
