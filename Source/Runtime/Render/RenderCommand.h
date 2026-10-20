@@ -74,6 +74,7 @@ public:
 
 	// 상수 버퍼의 일부 구간만 바인딩한다. FirstConstant·NumConstants는 16바이트 단위이며 16의 배수여야 한다.
 	static bool SupportsConstantBufferOffsets();
+	static bool SupportsClearView();
 	static void BindConstantBufferRange(uint32 Slot, FConstantBuffer* ConstantBuffer, uint32 FirstConstant, uint32 NumConstants, EShaderBindFlagBits FlagBits);
 
 	// 한 번의 Map으로 버퍼 전체를 채울 때 쓴다. 반환 포인터에는 순차적으로 쓰기만 해야 한다.
@@ -92,6 +93,7 @@ public:
 	static void BeginRenderPass(const FRenderingInfo& RenderingInfo);
 	static void EndRenderPass(const FRenderingInfo& RenderingInfo);
 	static void ClearDepthStencil(FTexture2D* DepthStencilTexture, float Depth = 1.0f, uint8 Stencil = 0);
+	static bool ClearDepthRegion(FTexture2D* DepthTexture, uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth = 1.0f);
 
 	static void SetViewport(uint32 InX, uint32 InY, uint32 InWidth, uint32 InHeight);
 
