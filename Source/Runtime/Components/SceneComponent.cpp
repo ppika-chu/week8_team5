@@ -10,6 +10,7 @@ USceneComponent::~USceneComponent()
 	for (USceneComponent* Child : Children)
 	{
 		Child->AttachParent = nullptr;
+		Child->MarkTransformDirty();
 	}
 	AttachChildren.Reset();
 

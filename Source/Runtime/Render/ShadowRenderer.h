@@ -3,6 +3,7 @@
 #include "Texture2D.h"
 #include "RenderPacket.h"
 #include "ShadowAtlas.h"
+#include "ShadowCasterState.h"
 #include "Core/Stats/ShadowStats.h"
 
 class FRenderer;
@@ -27,7 +28,7 @@ struct FLightShadowData
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
 	float DepthBias;
-	float ResolutionScale = 1.0f;
+	uint32 Resolution = DefaultShadowResolution;
 	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
 	uint32 bDebugCascades = 0;		// Cascade Debug 용
 	bool bAlwaysUpdate = false; 	// Shadow Map을 항상 업데이트할지 여부
@@ -48,6 +49,7 @@ struct alignas(16) FShadowInfo
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
 struct FShadowSettings
 {
+	uint32 BaseResolution = DefaultShadowResolution;
 	float  Distance     = 50.0f;
 	uint32 NumCascades  = 1;
 	float  SplitLambda  = 0.7f;
@@ -90,7 +92,12 @@ struct FShadowCacheEntry
 {
 	FShadowAtlasAllocation Allocation{};
 
+	// 캐시된 깊이 데이터를 생성할 때 사용한 행렬.
+	FMatrix RenderedLightViewProj;
+
 	uint64 RenderedRevision = 0;
+	// 현재 깊이 텍스처를 만들 때 참여한 Caster와 월드 변환 Revision.
+	TArray<FShadowCasterState> RenderedCasterStates;
 	bool bHasRenderedContent = false;
 };
 
@@ -98,6 +105,8 @@ struct FShadowFrameEntry
 {
 	FShadowKey Key{};
 	uint64 RequestedRevision = 0;
+	// 이번 맵 생성에 필요한 Caster와 월드 변환 Revision.
+	TArray<FShadowCasterState> RequestedCasterStates;
 };
 
 class FShadowRenderer
@@ -105,10 +114,16 @@ class FShadowRenderer
 public:
 	bool Init(FRenderer* InRenderer);
 
+	void SetShadowCacheEnabled(bool bEnabled)
+	{
+		bEnableShadowMapCache = bEnabled;
+	}
+
 	void SetParameters(
 		uint64 SceneID,
 		TArray<FLightShadowData>&& Lights,
 		uint32 LightSlotCount);
+	void UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShadowCasterState>& CasterStates);
 	void BeginShadowPass();
 	void OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex);
 	void EndShadowPass();
@@ -146,6 +161,8 @@ private:
 	//TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
 
 	/* Cache */
+	bool bEnableShadowMapCache = true;
+
 	// 프레임간 유지
 	TMap<FShadowKey, FShadowCacheEntry, FShadowKeyHash> ShadowCache;
 

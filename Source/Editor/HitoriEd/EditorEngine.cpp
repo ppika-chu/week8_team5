@@ -117,6 +117,7 @@ bool UEditorEngine::Init()
 
 	ShadowRenderer = MakeUnique<FShadowRenderer>();
 	ShadowRenderer->Init(Renderer);
+	OutputLogPanel->SetShadowRenderer(ShadowRenderer.get());
 
 
 	// 필요한 Panel들 추가후 raw pointer 반환(소유권 = EditorUI)
@@ -422,7 +423,10 @@ void UEditorEngine::RenderMultipleViewports()
 
 	// 런타임 그림자 설정. 한 프레임 동안 같은 값을 쓴다.
 	const FEditorSettings& EditorSettings = SettingsPanel->GetSettings();
+	constexpr uint32 ShadowResolutionLevels[] = { 512, 1024, 2048, 4096 };
+	const int32 ShadowQualityIndex = FMath::Clamp(EditorSettings.ShadowResolutionQuality, 0, 3);
 	const FShadowSettings ShadowSettings{
+		.BaseResolution = ShadowResolutionLevels[ShadowQualityIndex],
 		.Distance       = EditorSettings.ShadowDistance,
 		.NumCascades    = static_cast<uint32>(EditorSettings.NumCascades),
 		.SplitLambda    = EditorSettings.CascadeSplitLambda,
@@ -974,6 +978,16 @@ void UEditorEngine::RenderShadowPass()
 	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
 
 	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
+	TArray<FShadowCasterState> CasterStates;
+
+	// 조기 반환 전에 집합과 월드 변환을 검사해야 캐시의 유효성을 확인할 수 있다.
+	for (uint32 ShadowInfoIndex = 0; ShadowInfoIndex < static_cast<uint32>(ShadowInfos.Num()); ++ShadowInfoIndex)
+	{
+		const FMatrix& LightViewProj = ShadowInfos[ShadowInfoIndex].LightViewProj;
+		MultipleViewportsAdapter.CollectShadowCasterStates(LightViewProj, CasterStates);
+		ShadowRenderer->UpdateCasterSet(ShadowInfoIndex, CasterStates);
+	}
+
 	const TArray<uint32>& ShadowDirtyIndices = ShadowRenderer->GetDirtyShadowIndices();
 	if (ShadowDirtyIndices.Num() == 0)
 	{

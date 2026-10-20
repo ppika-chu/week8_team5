@@ -6,6 +6,8 @@
 #include "RenderingInfo.h"
 #include "Core/Windows/WindowsPlatformTime.h"
 
+#include <algorithm>
+
 constexpr uint32 MaxShadowInfos = 64;
 
 constexpr uint32 MinShadowAtlasSize = 1024;
@@ -55,6 +57,25 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 	return true;
 }
 
+static bool AreShadowMatricesEqual(
+	const FMatrix& Rendered,
+	const FMatrix& Requested)
+{
+	// Compare exactly: FMatrix equality otherwise allows a tolerance.
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		for (int32 Column = 0; Column < 4; ++Column)
+		{
+			if (Rendered.M[Row][Column] != Requested.M[Row][Column])
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 void FShadowRenderer::SetParameters(
 	uint64 SceneID,
 	TArray<FLightShadowData>&& Lights,
@@ -90,32 +111,16 @@ void FShadowRenderer::SetParameters(
 		CachedSceneID = SceneID;
 	}
 
-	// Validate resolution scale and clamp to [0.1, 1.0]
-	for (FLightShadowData& Light : Lights)
+	// Sort lights by final resolution (descending) to allocate larger shadow maps first
+	std::sort(Lights.begin(), Lights.end(), [](const FLightShadowData& A, const FLightShadowData& B)
 	{
-		if (!std::isfinite(Light.ResolutionScale) ||
-			Light.ResolutionScale <= 0.0f)
+		if (A.Resolution != B.Resolution)
 		{
-			Light.ResolutionScale = 0.0f;
-			continue;
+			return A.Resolution > B.Resolution;
 		}
 
-
-		Light.ResolutionScale =
-			FMath::Clamp(Light.ResolutionScale, 0.1f, 1.0f);
-	}
-
-	// Sort lights by resolution scale (descending) to allocate larger shadow maps first
-	std::sort(Lights.begin(), Lights.end(),
-		[](const FLightShadowData& A, const FLightShadowData& B)
-		{
-			if (A.ResolutionScale != B.ResolutionScale)
-			{
-				return A.ResolutionScale > B.ResolutionScale;
-			}
-
-			return A.LightID < B.LightID;
-		});
+		return A.LightID < B.LightID;
+	});
 
 	struct FShadowRequest
 	{
@@ -147,7 +152,7 @@ void FShadowRenderer::SetParameters(
 		const FLightShadowData& Light = Lights[LightIndex];
 
 		if (Light.LightSlotIndex >= SlotCount ||
-			Light.ResolutionScale <= 0.0f ||
+			Light.Resolution == 0 ||
 			AcceptedSlots[Light.LightSlotIndex] != 0 || // Check if the slot is already accepted
 			AcceptedLightIDs.Contains(Light.LightID)) // Check if the light ID is already accepted
 		{
@@ -163,13 +168,7 @@ void FShadowRenderer::SetParameters(
 			continue;
 		}
 
-		const uint32 Resolution = static_cast<uint32>(
-			Light.ResolutionScale * DefaultShadowResolution);
-
-		if (Resolution == 0)
-		{
-			continue;
-		}
+		const uint32 Resolution = Light.Resolution;
 
 		AcceptedSlots[Light.LightSlotIndex] = 1;
 		AcceptedLightIDs.Add(Light.LightID, true);
@@ -327,9 +326,13 @@ void FShadowRenderer::SetParameters(
 				});
 
 			const bool bNeedsRender =
+				!bEnableShadowMapCache ||
 				Light.bAlwaysUpdate ||
 				!Cache->bHasRenderedContent ||
-				Cache->RenderedRevision != Data.Revision;
+				Cache->RenderedRevision != Data.Revision ||
+				!AreShadowMatricesEqual(
+					Cache->RenderedLightViewProj,
+					Data.LightViewProj);
 
 			if (bNeedsRender)
 			{
@@ -409,6 +412,43 @@ void FShadowRenderer::BeginShadowPass()
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
+void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShadowCasterState>& CasterStates)
+{
+	FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
+	Frame.RequestedCasterStates = CasterStates;
+	auto& Requested = Frame.RequestedCasterStates;
+
+	// 수집 순서가 달라도 같은 집합으로 비교한다.
+	std::sort(Requested.begin(), Requested.end(), [](const auto& Left, const auto& Right)
+	{
+		return Left.CasterID < Right.CasterID;
+	});
+
+	// 이미 Dirty여도 렌더링 후 저장할 이번 목록은 위에서 확보한다.
+	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
+	{
+		return;
+	}
+
+	const FShadowCacheEntry* Cache = ShadowCache.Find(Frame.Key);
+	assert(Cache);
+
+	const auto& Rendered = Cache->RenderedCasterStates;
+	const bool bSameCasters = std::equal(
+		Rendered.begin(), Rendered.end(), Requested.begin(), Requested.end(),
+		[](const FShadowCasterState& Previous, const FShadowCasterState& Current)
+		{
+			return Current.TransformRevision != 0 &&
+				Previous.CasterID == Current.CasterID &&
+				Previous.TransformRevision == Current.TransformRevision;
+		});
+
+	if (!bSameCasters)
+	{
+		DirtyShadowIndices.Add(ShadowInfoIndex);
+	}
+}
+
 void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
 {
 	const FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
@@ -419,16 +459,18 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
 	const FShadowAtlasAllocation& Tile = Cache->Allocation;
 
+	// Invalidate cached content before attempting to update the tile.
+	Cache->bHasRenderedContent = false;
+
 	// Clear the depth region for the current shadow tile
 	if (!RenderCommand::ClearDepthRegion(
 		ShadowAtlas.GetTexture(),
 		Tile.X, Tile.Y,
 		Tile.Width, Tile.Height))
 	{
-		// If ClearDepthRegion fails, don't update the revision
+		// Keep the cache invalid and leave the revision unchanged on failure.
 		return;
 	}
-	Cache->bHasRenderedContent = false;
 
 	RenderCommand::SetViewport(
 		Tile.X, Tile.Y, Tile.Width, Tile.Height
@@ -445,6 +487,9 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	++CurrentViewStats.UpdatedMapCount;
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
+	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
+	// 깊이를 다시 그린 뒤에만 캐시의 Caster 기록을 교체한다.
+	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
 }
 

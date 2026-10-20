@@ -483,8 +483,8 @@ void FMultipleViewportsAdapter::CaptureWorld(UWorld& World)
 	const int32 Count = Scene.PrimitiveSceneProxies.Num();
 	for (int32 i = 0; i < Count;++i)
 	{
-		if (!Scene.PrimitiveFlags[i]) continue;
 		UPrimitiveComponent* Primitive = Scene.PrimitiveSceneProxies[i]->GetComponent();
+		// 별도 표시 플래그 대신 컴포넌트의 현재 상태를 직접 확인한다.
 		if (!Primitive || !Primitive->IsVisible() || !Primitive->GetOwner() ||
 			Primitive->GetOwner()->GetWorld() != &World) continue;
 		const ObjectId Id = Primitive->GetUUID();
@@ -768,9 +768,9 @@ void FMultipleViewportsAdapter::BuildRenderQueue(const int32 ViewIndex, FRenderQ
 		PendingStaticMeshes[I]->SubmitToRenderQueue(OutQueue, SelectedLODs[I]);
 }
 
-void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue)
+void FMultipleViewportsAdapter::CollectShadowCasterStates(const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates)
 {
-	OutQueue.Reset();
+	OutCasterStates.Reset();
 
 	const FFrustumPlanes LightFrustum = ExtractFrustumPlanes(LightViewProj);
 	
@@ -782,8 +782,13 @@ void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, F
 		const auto Found = PrimitiveById.Find(Id);
 		if (!Found || !Found->Primitive)	continue;
 
-        auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
-		if (!StaticComponent || !StaticComponent->GetStaticMesh() || StaticComponent->IsEditorIcon()) continue;
+		auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
+		if (!StaticComponent ||
+			!StaticComponent->GetStaticMesh() ||
+			StaticComponent->IsEditorIcon())
+		{
+			continue;
+		}
 
 		const FPrimitiveSceneProxy* Proxy = StaticComponent->GetSceneProxy();
 		const bool bCastShadows = Proxy
@@ -794,7 +799,32 @@ void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, F
 			continue;
 		}
 
-		StaticComponent->SubmitToRenderQueue(OutQueue, 0);		// LOD 0
+		const uint64 TransformRevision = Proxy ? Proxy->GetTransformRevision() : 0;
+		OutCasterStates.Add(FShadowCasterState{
+			.CasterID = static_cast<uint64>(Id),
+			.TransformRevision = TransformRevision
+		});
+	}
+}
+
+void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue)
+{
+	OutQueue.Reset();
+
+	// 캐시 비교와 실제 렌더링에 같은 Caster 선택 조건을 사용한다.
+	TArray<FShadowCasterState> CasterStates;
+	CollectShadowCasterStates(LightViewProj, CasterStates);
+
+	for (const FShadowCasterState& CasterState : CasterStates)
+	{
+		const auto Found = PrimitiveById.Find(static_cast<ObjectId>(CasterState.CasterID));
+		if (!Found || !Found->Primitive) continue;
+
+		auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
+		if (StaticComponent)
+		{
+			StaticComponent->SubmitToRenderQueue(OutQueue, 0); // LOD 0
+		}
 	}
 }
 
