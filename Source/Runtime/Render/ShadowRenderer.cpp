@@ -4,6 +4,9 @@
 #include "Renderer.h"
 #include "RenderCommand.h"
 #include "RenderingInfo.h"
+#include "Core/Windows/WindowsPlatformTime.h"
+
+#include <algorithm>
 
 constexpr uint32 MaxShadowInfos = 64;
 
@@ -43,17 +46,50 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 		return false;
 	}
 
-	SetParameters({}, 0);
+	if (!RenderCommand::SupportsClearView())
+	{
+		// ClearView ¡ˆø¯«œ¡ˆ æ ¿∏∏È ShadowRenderer∏¶ ªÁøÎ«“ ºˆ æ¯¥Ÿ.
+		return false;
+	}
+
+	SetParameters(0, {}, 0);
+
+	return true;
+}
+
+static bool AreShadowMatricesEqual(
+	const FMatrix& Rendered,
+	const FMatrix& Requested)
+{
+	// Compare exactly: FMatrix equality otherwise allows a tolerance.
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		for (int32 Column = 0; Column < 4; ++Column)
+		{
+			if (Rendered.M[Row][Column] != Requested.M[Row][Column])
+			{
+				return false;
+			}
+		}
+	}
 
 	return true;
 }
 
 void FShadowRenderer::SetParameters(
+	uint64 SceneID,
 	TArray<FLightShadowData>&& Lights,
 	uint32 LightSlotCount)
 {
+	CurrentViewStats = {};
+	for (const FLightShadowData& Light : Lights)
+	{
+		CurrentViewStats.RequestedMapCount += static_cast<uint32>(Light.Maps.Num());
+	}
+
 	ShadowInfos.Reset(MaxShadowInfos);
-	ShadowAllocations.Reset(MaxShadowInfos);
+	ShadowFrameEntries.Reset(MaxShadowInfos);
+	DirtyShadowIndices.Reset(MaxShadowInfos);
 
 	const uint32 MaxLightSlots =
 		MaxDirectionalLights + MaxLocalLights;
@@ -68,38 +104,39 @@ void FShadowRenderer::SetParameters(
 		LightShadowRanges.Add(FLightShadowRange{});
 	}
 
-	// Validate resolution scale and clamp to [0.1, 1.0]
-	for (FLightShadowData& Light : Lights)
+	// Clear the shadow cache if the scene ID has changed
+	if (CachedSceneID != SceneID)
 	{
-		if (!std::isfinite(Light.ResolutionScale) ||
-			Light.ResolutionScale <= 0.0f)
-		{
-			Light.ResolutionScale = 0.0f;
-			continue;
-		}
-
-
-		Light.ResolutionScale =
-			FMath::Clamp(Light.ResolutionScale, 0.1f, 1.0f);
+		ShadowCache.Reset();
+		CachedSceneID = SceneID;
 	}
 
-	// Sort lights by resolution scale (descending) to allocate larger shadow maps first
-	std::sort(Lights.begin(), Lights.end(),
-		[](const FLightShadowData& A, const FLightShadowData& B)
+	// Sort lights by final resolution (descending) to allocate larger shadow maps first
+	std::sort(Lights.begin(), Lights.end(), [](const FLightShadowData& A, const FLightShadowData& B)
+	{
+		if (A.Resolution != B.Resolution)
 		{
-			return A.ResolutionScale > B.ResolutionScale;
-		});
+			return A.Resolution > B.Resolution;
+		}
+
+		return A.LightID < B.LightID;
+	});
 
 	struct FShadowRequest
 	{
+		FShadowKey Key{};
 		uint32 LightIndex;
 		uint32 MapIndex;
+		uint32 Resolution;
 	};
 
 	TArray<FShadowRequest> Requests;
 	TArray<uint32> Resolutions;
-
 	TArray<uint32> AcceptedSlots;
+	TMap<uint64, bool> AcceptedLightIDs;
+
+	Requests.Reset(MaxShadowInfos);
+	Resolutions.Reset(MaxShadowInfos);
 	AcceptedSlots.Reset(SlotCount);
 
 	for (uint32 i = 0; i < SlotCount; ++i)
@@ -115,8 +152,9 @@ void FShadowRenderer::SetParameters(
 		const FLightShadowData& Light = Lights[LightIndex];
 
 		if (Light.LightSlotIndex >= SlotCount ||
-			Light.ResolutionScale <= 0.0f ||
-			AcceptedSlots[Light.LightSlotIndex] != 0) // Check if the slot is already accepted
+			Light.Resolution == 0 ||
+			AcceptedSlots[Light.LightSlotIndex] != 0 || // Check if the slot is already accepted
+			AcceptedLightIDs.Contains(Light.LightID)) // Check if the light ID is already accepted
 		{
 			continue;
 		}
@@ -130,38 +168,67 @@ void FShadowRenderer::SetParameters(
 			continue;
 		}
 
-		const uint32 Resolution = static_cast<uint32>(
-			Light.ResolutionScale * DefaultShadowResolution);
-
-		if (Resolution == 0)
-		{
-			continue;
-		}
+		const uint32 Resolution = Light.Resolution;
 
 		AcceptedSlots[Light.LightSlotIndex] = 1;
+		AcceptedLightIDs.Add(Light.LightID, true);
 
 		for (uint32 MapIndex = 0;
 			MapIndex < MapCount;
 			++MapIndex)
 		{
 			Requests.Add(FShadowRequest{
+				.Key = {
+					.LightID = Light.LightID,
+					.MapIndex = MapIndex
+				},
 				.LightIndex = LightIndex,
-				.MapIndex = MapIndex
+				.MapIndex = MapIndex,
+				.Resolution = Resolution
 				});
 
 			Resolutions.Add(Resolution);
 		}
 	}
 
-	// 2. Try to pack the shadow maps into the atlas
-	TArray<FShadowAtlasAllocation> PackedAllocations;
-	bool bReady = false;
+	// 2. Check for layout changes
+	// Re-build if the number, key, or resolution of shadow requests has changed
+	bool bLayoutChanged =
+		ShadowCache.Num() != static_cast<uint32>(Requests.Num());
 
-	if (Requests.Num() > 0)
+	if (!bLayoutChanged)
 	{
+		for (const FShadowRequest& Request : Requests)
+		{
+			const FShadowCacheEntry* Cache =
+				ShadowCache.Find(Request.Key);
+
+			if (!Cache ||
+				Cache->Allocation.Width != Request.Resolution ||
+				Cache->Allocation.Height != Request.Resolution)
+			{
+				bLayoutChanged = true;
+				break;
+			}
+		}
+	}
+
+	bool bReady = true;
+
+	if (Requests.Num() == 0)
+	{
+		ShadowCache.Reset();
+	}
+	else if (bLayoutChanged) // Pack only if the layout has changed
+	{
+		// 3. Try to pack the shadow maps into the atlas
+		TArray<FShadowAtlasAllocation> PackedAllocations;
+
 		uint32 CandidateSize = FMath::Max(
 			ShadowAtlas.GetSize(),
 			MinShadowAtlasSize);
+
+		bReady = false;
 
 		while (CandidateSize <= MaxShadowAtlasSize)
 		{
@@ -181,34 +248,60 @@ void FShadowRenderer::SetParameters(
 			}
 
 			CandidateSize *= 2;
+		}
 
+		// Replace the cache with new allocations if packing was successful
+		if (bReady)
+		{
+			assert(PackedAllocations.Num() == Requests.Num());
+
+			ShadowCache.Reset();
+
+			for (uint32 i = 0;
+				i < static_cast<uint32>(Requests.Num());
+				++i)
+			{
+				ShadowCache.Add(
+					Requests[i].Key,
+					FShadowCacheEntry{
+						.Allocation = PackedAllocations[i],
+						.RenderedRevision = 0,
+						.bHasRenderedContent = false
+					});
+			}
 		}
 	}
 
-	// 3. Update GPU data based on the packing results
-	if (bReady)
+	// 4. Update GPU data and dirty lists based on the packing results
+	if (bReady && Requests.Num() > 0)
 	{
 		const float InvAtlasSize =
 			1.0f / static_cast<float>(ShadowAtlas.GetSize());
 
-		for (uint32 RequestIndex = 0;
-			RequestIndex < static_cast<uint32>(Requests.Num());
-			++RequestIndex)
+		//for (uint32 RequestIndex = 0;
+		//	RequestIndex < static_cast<uint32>(Requests.Num());
+		//	++RequestIndex)
+		for (const FShadowRequest& Request : Requests)
 		{
-			const FShadowRequest& Request = Requests[RequestIndex];
 			const FLightShadowData& Light = Lights[Request.LightIndex];
 			const FShadowData& Data = Light.Maps[Request.MapIndex];
+			const FShadowCacheEntry* Cache =
+				ShadowCache.Find(Request.Key);
+
+			assert(Cache);
+
 			const FShadowAtlasAllocation& Allocation =
-				PackedAllocations[RequestIndex];
+				Cache->Allocation;
+
+			const uint32 ShadowInfoIndex =
+				static_cast<uint32>(ShadowInfos.Num());
 
 			FLightShadowRange& Range =
 				LightShadowRanges[Light.LightSlotIndex];
 
 			if (Range.Count == 0)
 			{
-				Range.Offset =
-					static_cast<uint32>(ShadowInfos.Num());
-
+				Range.Offset = ShadowInfoIndex;
 				Range.BlendWidth = Light.BlendWidth;
 				Range.bDebugCascades = Light.bDebugCascades;
 			}
@@ -228,9 +321,36 @@ void FShadowRenderer::SetParameters(
 				.SlopeBias = Light.SlopeBias,
 				});
 
-			ShadowAllocations.Add(Allocation);
+			ShadowFrameEntries.Add(FShadowFrameEntry{
+				.Key = Request.Key,
+				.RequestedRevision = Data.Revision
+				});
+
+			const bool bNeedsRender =
+				!bEnableShadowMapCache ||
+				Light.bAlwaysUpdate ||
+				!Cache->bHasRenderedContent ||
+				Cache->RenderedRevision != Data.Revision ||
+				!AreShadowMatricesEqual(
+					Cache->RenderedLightViewProj,
+					Data.LightViewProj);
+
+			if (bNeedsRender)
+			{
+				DirtyShadowIndices.Add(ShadowInfoIndex);
+			}
+
 			++Range.Count;
 		}
+	}
+
+	CurrentViewStats.AllocatedMapCount = static_cast<uint32>(ShadowInfos.Num());
+	CurrentViewStats.AtlasSize = ShadowAtlas.GetSize();
+	for (const auto& [Key, Cache] : ShadowCache)
+	{
+		const FShadowAtlasAllocation& Allocation = Cache.Allocation;
+		CurrentViewStats.AllocatedTexelCount +=
+			static_cast<uint64>(Allocation.Width) * Allocation.Height;
 	}
 
 	// If packing failed, ShadowInfos is empty, and Range.Count remains 0 for all lights.
@@ -266,6 +386,8 @@ void FShadowRenderer::BindForLighting() const
 
 void FShadowRenderer::BeginShadowPass()
 {
+	ShadowPassStartCycles = FPlatformTime::GetCycles64();
+
 	constexpr auto Stages =
 		EShaderBindFlagBits::Vertex |
 		EShaderBindFlagBits::Pixel;
@@ -279,24 +401,79 @@ void FShadowRenderer::BeginShadowPass()
 		},
 		.DepthStencil = {
 			.Texture = ShadowAtlas.GetTexture(),
-			.LoadOp = ERenderTargetLoadOp::Clear
+			.LoadOp = ERenderTargetLoadOp::Load, // LoadOp¿ª Load∑Œ º≥¡§«œø© ±‚¡∏ ≥ªøÎ¿ª ¿Ø¡ˆ
 		}
 	};
 
 	RenderCommand::BeginRenderPass(Pass);
 
-	RenderCommand::SetRasterizerState(
-		ERasterizerState::ShadowDepth);
 	RenderCommand::SetPrimitiveTopology(
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
+void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShadowCasterState>& CasterStates)
+{
+	FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
+	Frame.RequestedCasterStates = CasterStates;
+	auto& Requested = Frame.RequestedCasterStates;
+
+	// ÏàòÏßë ÏàúÏÑúÍ∞Ä Îã¨ÎùºÎèÑ Í∞ôÏùÄ ÏßëÌï©ÏúºÎ°ú ÎπÑÍµêÌïúÎã§.
+	std::sort(Requested.begin(), Requested.end(), [](const auto& Left, const auto& Right)
+	{
+		return Left.CasterID < Right.CasterID;
+	});
+
+	// Ïù¥ÎØ∏ DirtyÏó¨ÎèÑ Î†åÎçîÎßÅ ÌõÑ Ï†ÄÏû•Ìï† Ïù¥Î≤à Î™©Î°ùÏùÄ ÏúÑÏóêÏÑú ÌôïÎ≥¥ÌïúÎã§.
+	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
+	{
+		return;
+	}
+
+	const FShadowCacheEntry* Cache = ShadowCache.Find(Frame.Key);
+	assert(Cache);
+
+	const auto& Rendered = Cache->RenderedCasterStates;
+	const bool bSameCasters = std::equal(
+		Rendered.begin(), Rendered.end(), Requested.begin(), Requested.end(),
+		[](const FShadowCasterState& Previous, const FShadowCasterState& Current)
+		{
+			return Current.TransformRevision != 0 &&
+				Previous.CasterID == Current.CasterID &&
+				Previous.TransformRevision == Current.TransformRevision;
+		});
+
+	if (!bSameCasters)
+	{
+		DirtyShadowIndices.Add(ShadowInfoIndex);
+	}
+}
+
 void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
 {
-	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
-	const FShadowAtlasAllocation& Tile =
-		ShadowAllocations[ShadowInfoIndex];
+	const FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
 
+	FShadowCacheEntry* Cache = ShadowCache.Find(Frame.Key);
+	assert(Cache);
+
+	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	const FShadowAtlasAllocation& Tile = Cache->Allocation;
+
+	// Invalidate cached content before attempting to update the tile.
+	Cache->bHasRenderedContent = false;
+
+	// Clear the depth region for the current shadow tile
+	if (!RenderCommand::ClearDepthRegion(
+		ShadowAtlas.GetTexture(),
+		Tile.X, Tile.Y,
+		Tile.Width, Tile.Height))
+	{
+		// Keep the cache invalid and leave the revision unchanged on failure.
+		return;
+	}
+
+	const FLightShadowRange& DirectionalRange = LightShadowRanges[0];
+	const bool bDirectional = ShadowInfoIndex >= DirectionalRange.Offset && ShadowInfoIndex < DirectionalRange.Offset + DirectionalRange.Count;
+	RenderCommand::SetRasterizerState(bDirectional ? ERasterizerState::DirectionalShadowDepth : ERasterizerState::ShadowDepth);
 	RenderCommand::SetViewport(
 		Tile.X, Tile.Y, Tile.Width, Tile.Height
 	);
@@ -305,8 +482,17 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 		ShadowQueue,
 		ShadowInfo.LightViewProj);
 
+	const uint64 DrawCallsBefore = RenderCommand::GetDrawIndexedCallCount();
 	Renderer->RenderPreparedDepth(
 		ShadowInfo.LightViewProj, true);
+	CurrentViewStats.DrawCallCount += RenderCommand::GetDrawIndexedCallCount() - DrawCallsBefore;
+	++CurrentViewStats.UpdatedMapCount;
+
+	Cache->RenderedRevision = Frame.RequestedRevision;
+	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
+	// ÍπäÏù¥Î•º Îã§Ïãú Í∑∏Î¶∞ Îí§ÏóêÎßå Ï∫êÏãúÏùò Caster Í∏∞Î°ùÏùÑ ÍµêÏ≤¥ÌïúÎã§.
+	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
+	Cache->bHasRenderedContent = true;
 }
 
 void FShadowRenderer::EndShadowPass()
@@ -321,4 +507,58 @@ void FShadowRenderer::EndShadowPass()
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::SolidBack);
+
+	const uint64 ElapsedCycles = FPlatformTime::GetCycles64() - ShadowPassStartCycles;
+	CurrentViewStats.CpuTimeMs = FPlatformTime::ToMilliseconds64(ElapsedCycles);
+}
+
+TArray<FShadowAtlasAllocation> FShadowRenderer::GetShadowMapRects(uint32 LightID) const
+{
+	TArray<std::pair<uint64, FShadowAtlasAllocation>> Sorted;
+	for (const auto& [Key, Cache] : ShadowCache)
+	{
+		if (Key.LightID == LightID)
+		{
+			Sorted.Add({ Key.MapIndex, Cache.Allocation });
+		}
+	}
+
+	std::sort(Sorted.begin(), Sorted.end(), [](const std::pair<uint64, FShadowAtlasAllocation>& A, const std::pair<uint64, FShadowAtlasAllocation>& B) {
+		if (A.second.Y == B.second.Y)
+			return A.second.X < B.second.X;
+		return A.second.Y < B.second.Y;
+		});
+	
+	TArray<FShadowAtlasAllocation> Result;
+	for (const auto& [Index, Allocation] : Sorted)
+	{
+		Result.Add(Allocation);
+	}
+	
+	return Result;
+}
+
+TArray<FShadowInfo> FShadowRenderer::GetShadowInfosByLightUUID(uint32 LightID) const
+{
+	TArray<std::pair<uint64, FShadowInfo>> Sorted;
+	for (uint32 i = 0; i < static_cast<uint32>(ShadowFrameEntries.Num()); ++i)
+	{
+		const FShadowFrameEntry& Frame = ShadowFrameEntries[i];
+		if (Frame.Key.LightID == LightID)
+		{
+			Sorted.Add({ Frame.Key.MapIndex, ShadowInfos[i] });
+		}
+	}
+
+	std::sort(Sorted.begin(), Sorted.end(), [](const std::pair<uint64, FShadowInfo>& A, const std::pair<uint64, FShadowInfo>& B) {
+		return A.first < B.first;
+		});
+
+	TArray<FShadowInfo> Result;
+	for (const auto& [Index, Info] : Sorted)
+	{
+		Result.Add(Info);
+	}
+
+	return Result;
 }

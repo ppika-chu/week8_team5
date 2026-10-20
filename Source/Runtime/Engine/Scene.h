@@ -51,8 +51,9 @@ public:
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
 
-	const FDirectionalLightSceneProxy* GetMainDirectionalLight() const;
+	FDirectionalLightSceneProxy* GetMainDirectionalLight();
 	const FBox& GetBounds() const { return BVH.GetRootBounds(); }
+	uint64 GetSceneID() const { return SceneID; }
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
@@ -76,4 +77,8 @@ public:
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
 	TArray<FDirectionalLightSceneProxy*>  DirectionalLightProxies;
 	TArray<USkyLightComponent*>           SkyLights;               // 프록시 없음
+
+private:
+	inline static uint64 NextSceneID = 1;
+	const uint64 SceneID = NextSceneID++;
 };

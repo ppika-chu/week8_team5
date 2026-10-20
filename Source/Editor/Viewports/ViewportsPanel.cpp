@@ -381,6 +381,17 @@ void FViewportsPanel::OnRender()
 	ImGui::PopStyleVar();
 }
 
+void FViewportsPanel::SetShadowStats(const FShadowRenderStats* ViewStats, const bool* ValidViews, const FShadowFrameStats& FrameStats, const FShadowGpuFrameStats& GpuStats)
+{
+	for (int32 ViewIndex = 0; ViewIndex < MaxShadowStatsViewCount; ++ViewIndex)
+	{
+		ShadowViewStats[ViewIndex] = ViewStats[ViewIndex];
+		bShadowViewStatsValid[ViewIndex] = ValidViews[ViewIndex];
+	}
+	ShadowFrameStats = FrameStats;
+	ShadowGpuFrameStats = GpuStats;
+}
+
 // 항목별 줄을 모아 한 번에 배경과 텍스트를 그린다.
 void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMin) const
 {
@@ -412,6 +423,33 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 			FStatOverlay::GetObjectAllocationCount()), ValueColor});
 		Lines.Add({std::format("  Process {:.2f} MB",
 			static_cast<double>(FStatOverlay::GetProcessWorkingSetBytes()) / BytesPerMegabyte), ValueColor});
+	}
+
+	if (FStatOverlay::IsEnabled(EStatFlags::Shadow))
+	{
+		Lines.Add({"Shadow (all rendered views)", TitleColor});
+		Lines.Add({std::format("  CPU {:.3f} ms | Draws {} | Views {}", ShadowFrameStats.CpuTimeMs, ShadowFrameStats.DrawCallCount, ShadowFrameStats.ViewCount), ValueColor});
+		Lines.Add({std::format("  Maps req/alloc/update: {}/{}/{}", ShadowFrameStats.RequestedMapCount, ShadowFrameStats.AllocatedMapCount, ShadowFrameStats.UpdatedMapCount), ValueColor});
+		if (ShadowGpuFrameStats.bValid)
+		{
+			const uint64 Age = ShadowFrameStats.FrameNumber >= ShadowGpuFrameStats.FrameNumber
+				? ShadowFrameStats.FrameNumber - ShadowGpuFrameStats.FrameNumber : 0;
+			Lines.Add({std::format("  GPU {:.3f} ms ({} frames old)", ShadowGpuFrameStats.TotalTimeMs, Age), ValueColor});
+		}
+		else
+		{
+			Lines.Add({"  GPU: pending / unavailable", ValueColor});
+		}
+
+		const int32 ViewIndex = ViewportAdapter ? ViewportAdapter->GetEditorViewIndex() : InvalidViewIndex;
+		if (ViewIndex >= 0 && ViewIndex < MaxShadowStatsViewCount && bShadowViewStatsValid[ViewIndex])
+		{
+			const FShadowRenderStats& Stats = ShadowViewStats[ViewIndex];
+			const double AtlasArea = static_cast<double>(Stats.AtlasSize) * Stats.AtlasSize;
+			const double UsagePercent = AtlasArea > 0.0 ? 100.0 * static_cast<double>(Stats.AllocatedTexelCount) / AtlasArea : 0.0;
+			Lines.Add({std::format("  View {}: CPU {:.3f} ms | Draws {}", ViewIndex, Stats.CpuTimeMs, Stats.DrawCallCount), ValueColor});
+			Lines.Add({std::format("  Atlas {}x{} | tiles {:.1f}%", Stats.AtlasSize, Stats.AtlasSize, UsagePercent), ValueColor});
+		}
 	}
 
 	struct FProfileStatLine

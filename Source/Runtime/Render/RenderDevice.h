@@ -30,6 +30,7 @@ public:
 	ID3D11DeviceContext* GetContext() const { return DeviceContext.Get(); }
 	// D3D11.1 상수 버퍼 오프셋 바인딩(VSSetConstantBuffers1)을 지원하지 않으면 nullptr
 	ID3D11DeviceContext1* GetContext1() const { return bConstantBufferOffsetting ? DeviceContext1.Get() : nullptr; }
+	ID3D11DeviceContext1* GetClearViewContext() const { return bClearViewSupported ? DeviceContext1.Get() : nullptr; }
 	IDXGIFactory* GetFactory() const { return DXGIFactory.Get(); }
 
 	TUniquePtr<FVertexBuffer> CreateStaticVertexBuffer(const void* InVertices, uint32 InSize, uint32 Stride);
@@ -67,6 +68,7 @@ private:
 	ComPtr<ID3D11DeviceContext> DeviceContext;
 	ComPtr<ID3D11DeviceContext1> DeviceContext1;
 	bool bConstantBufferOffsetting = false;
+	bool bClearViewSupported = false;
 	ComPtr<IDXGIFactory> DXGIFactory;
 
 	D3D_FEATURE_LEVEL FeatureLevel;

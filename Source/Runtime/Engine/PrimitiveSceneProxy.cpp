@@ -5,6 +5,22 @@
 #include "Render/Mesh.h"
 #include "Engine/Scene.h"
 
+static bool AreWorldMatricesEqual(const FMatrix& Previous, const FMatrix& Current)
+{
+    for (int32 Row = 0; Row < 4; ++Row)
+    {
+        for (int32 Column = 0; Column < 4; ++Column)
+        {
+            if (Previous.M[Row][Column] != Current.M[Row][Column])
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 FPrimitiveSceneProxy::~FPrimitiveSceneProxy()
 {
     if (Mesh) Mesh->UnregisterProxy(this);
@@ -27,7 +43,16 @@ void FPrimitiveSceneProxy::OnMeshDestroyed()
 
 void FPrimitiveSceneProxy::UpdateTransform()
 {
-    LocalToWorld = Component->GetWorldMatrix();
+    const FMatrix NewLocalToWorld = Component->GetWorldMatrix();
+    const bool bFirstUpdate = TransformRevision == 0;
+    const bool bTransformChanged = bFirstUpdate || !AreWorldMatricesEqual(LocalToWorld, NewLocalToWorld);
+
+    if (bTransformChanged)
+    {
+        ++TransformRevision;
+    }
+
+    LocalToWorld = NewLocalToWorld;
     WorldToLocal = LocalToWorld.Inverse();
     const FBox LocalBounds = Mesh ? Mesh->GetRenderBounds() : Component->CalcLocalBounds();
     Bounds = MakeWorldBounds(LocalBounds.GetWorldAABB(LocalToWorld));
@@ -40,6 +65,8 @@ void FPrimitiveSceneProxy::UpdateRenderState()
     Mesh = nullptr;
     RenderState.reset();
     bVisible = Component->IsVisible();
+    bCastShadows = Component->IsCastingShadows();
+    bReceiveShadows = Component->IsReceivingShadows();
     UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component);
     if (StaticMeshComponent) Mesh = StaticMeshComponent->GetStaticMesh();
     if (Mesh != PreviousMesh)

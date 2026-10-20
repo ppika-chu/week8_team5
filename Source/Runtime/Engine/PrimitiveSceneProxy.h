@@ -21,10 +21,13 @@ public:
     UPrimitiveComponent* GetComponent() const { return Component; }
     const FAABB& GetBounds() const { return Bounds; }
     const FMatrix& GetLocalToWorld() const { return LocalToWorld; }
+    uint64 GetTransformRevision() const { return TransformRevision; }
     const FMatrix& GetWorldToLocal() const { return WorldToLocal; }
     const FLODSphere& GetLODSphere() const { return LODSphere; }
     UStaticMesh* GetMesh() const { return Mesh; }
     bool IsVisible() const { return bVisible; }
+    bool IsCastingShadows() const { return bCastShadows; }
+    bool IsReceivingShadows() const { return bReceiveShadows; }
     uint8 GetLODCount() const { return RenderState ? RenderState->LODCount : 1; }
     const FMeshRenderState* GetRenderState() const { return RenderState.get(); }
     const float* GetLODThresholdsSq() const { return RenderState->LODThresholdSq; }
@@ -39,10 +42,13 @@ private:
     TSharedPtr<const FMeshRenderState> RenderState;
     FMatrix LocalToWorld;
     FMatrix WorldToLocal;
+    uint64 TransformRevision = 0;
     FAABB Bounds;
     FLODSphere LODSphere;
     int32 PackedIndex = INDEX_NONE;
     bool bQueuedForUpdate = false;
     bool bRenderStateQueued = false;
     bool bVisible = true;
+    bool bCastShadows = true;
+    bool bReceiveShadows = true;
 };

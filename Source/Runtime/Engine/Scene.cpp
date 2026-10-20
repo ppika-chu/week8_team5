@@ -9,8 +9,22 @@
 #include "PointLightSceneProxy.h"
 #include "Render/ShadowCascade.h"
 
+#include <cmath>
+
 namespace
 {
+	uint32 CalculateShadowResolution(uint32 BaseResolution, float ResolutionScale)
+	{
+		if (!std::isfinite(ResolutionScale) || ResolutionScale <= 0.0f)
+		{
+			return 0;
+		}
+
+		const float ClampedScale = FMath::Clamp(ResolutionScale, 0.1f, 1.0f);
+
+		return static_cast<uint32>(static_cast<float>(BaseResolution) * ClampedScale);
+	}
+
 	float GetPaddedShadowFov(
 		float OriginalFovDegrees,
 		uint32 Resolution,
@@ -196,7 +210,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 	}
 	
 	TArray<FLightShadowData> Lights;
-	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
+	if (FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
 	{
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
@@ -207,7 +221,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		// 씬 전체를 감싸는 Ortho 박스. 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
 		const FBox& Bounds = GetBounds();
 		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
-		if (Radius > 0.0f)
+		const ULightComponent* LightComponent = Proxy->GetLightComponent();
+		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
+		if (Radius > 0.0f && LightComponent->IsCastingShadows() && Resolution > 0)
 		{
 			FVector Forward, Right, Up;
 			Proxy->GetShadowBasis(Forward,Right, Up);
@@ -224,26 +240,60 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			FVector Near[4], Far[4];
 			GetFrustumPlaneCorners(CameraViewProj, Near, Far);
 			
-			const uint32 Count = FMath::Clamp(Shadow.NumCascades, 1u, MaxCascades);
+			const uint32 Count = (bOrtho)? 1u : FMath::Clamp(Shadow.NumCascades, 1u, MaxCascades);
 			float Splits[MaxCascades + 1];
-			ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
+
+			// Ortho 이면 Cascade 하나 만들고 Near, Far 조정
+			if (bOrtho)
+			{
+				// 물체가 존재하는 곳 (씬 Bounds)의 최소 깊이, 최대 깊이 가져오기
+				float MinZ = 1.0f, MaxZ = 0.0f;
+				for (int32 c = 0; c < 8; ++c)
+				{
+					// 첫번째, 두번째, 세번째 비트 검사
+					const FVector P((c & 1) ? Bounds.Max.X : Bounds.Min.X,
+									(c & 2) ? Bounds.Max.Y : Bounds.Min.Y,
+									(c & 4) ? Bounds.Max.Z : Bounds.Min.Z);
+					
+					const FVector4 Clip = CameraViewProj.TransformFVector4(FVector4(P.X, P.Y, P.Z, 1.0f));
+
+					// MinZ, MaxZ 갱신
+					MinZ = FMath::Min(MinZ, Clip.Z);
+					MaxZ = FMath::Max(MaxZ, Clip.Z);
+				}
+				// 카메라 
+				MinZ = FMath::Clamp(MinZ, 0.0f, 1.0f);
+				MaxZ = FMath::Clamp(MaxZ, 0.0f, 1.0f);
+				
+				// Splits[0] ~ splits[1] 구간의 Cascade 하나
+				Splits[0] = CamNear + MinZ * (CamFar - CamNear);
+				Splits[1] = CamNear + MaxZ * (CamFar - CamNear);
+			}
+			else
+			{
+				ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
+			}
 			
 			FLightShadowData Directional{};
+			Directional.LightID = Proxy->GetLightComponent()->GetUUID();
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
 			Directional.SlopeBias = Proxy->GetLightComponent()->GetShadowSlopeBias();
-			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
+			Directional.Resolution = Resolution;
 			Directional.BlendWidth = Shadow.BlendWidth;
 			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;
-			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			
+			// Cascade별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
+			// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.
+			// Proxy->UpdateShadowRevision();
 			for (uint32 i = 0; i < Count; ++i)
 			{
 				FVector Corners[8];
 				GetSliceCorners(Near, Far, CamNear, CamFar, Splits[i], Splits[i+1], Corners);
-				Directional.Maps.Add(FShadowData{
-					FitCascade(Corners, Forward, Right, Up, Resolution),
-				});
+				FShadowData ShadowData = FitCascade(Corners, Forward, Right, Up, Resolution);
+				ShadowData.Revision = Proxy->GetShadowRevision();
+
+				Directional.Maps.Add(ShadowData);
 			}
 			Lights.Add(Directional);
 		}
@@ -259,16 +309,22 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		const ULightComponent* LightComponent = LightProxy->GetLightComponent();
 		const float NearZ = 0.1f;
 		const float FarZ = LightParameter.Radius;
+		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
 
-		if (LightProxy->IsVisible() == false || FarZ <= NearZ)
+		if (!LightProxy->IsVisible() || !LightComponent->IsCastingShadows() || FarZ <= NearZ || Resolution == 0)
+		{
 			continue;
+		}
 
 		FLightShadowData Local{};
+		Local.LightID = LightComponent->GetUUID();
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
-		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
-		const uint32 Resolution = Local.ResolutionScale * DefaultShadowResolution;
+		Local.Resolution = Resolution;
 
+		// 맵별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
+		// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.
+		// LightProxy->UpdateShadowRevision();
 		switch (LightComponent->GetLightType())
 		{
 		case ELightType::Spot:
@@ -286,6 +342,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 
 			FShadowData ShadowData{};
 			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), ShadowFov, NearZ, FarZ);
+			ShadowData.Revision = LightProxy->GetShadowRevision();
 
 			Local.Maps.Add(ShadowData);
 
@@ -299,6 +356,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			{
 				FShadowData ShadowData{};
 				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, ShadowFov, NearZ, FarZ);
+				ShadowData.Revision = LightProxy->GetShadowRevision();
 
 				Local.Maps.Add(ShadowData);
 			}
@@ -317,12 +375,15 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
-	ShadowRenderer->SetParameters(std::move(Lights), MaxDirectionalLights + MaxLocalLights);
+	ShadowRenderer->SetParameters(
+		GetSceneID(),
+		std::move(Lights),
+		MaxDirectionalLights + MaxLocalLights);
 }
 
-const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const
+FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight()
 {
-	for (const FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
 	{
 		if (Proxy->IsVisible())	return Proxy;
 	}
