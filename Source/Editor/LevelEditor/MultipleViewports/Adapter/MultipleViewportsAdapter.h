@@ -6,6 +6,7 @@
 #include "Containers/Queue.h"
 #include "Math/Matrix.h"
 #include "Render/RenderPacket.h"
+#include "Render/ShadowCasterState.h"
 #include "Render/ViewMode.h"
 #include "Asset/LOD/StaticMeshLODSelector.h"
 
@@ -122,6 +123,7 @@ public:
     FMatrix GetEngineView(int32 ViewIndex) const;
     FMatrix GetEngineProjection(int32 ViewIndex) const;
 
+    void CollectShadowCasterStates(const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates);
     void BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue);
 
 private:

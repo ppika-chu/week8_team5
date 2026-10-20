@@ -21,6 +21,7 @@ public:
     UPrimitiveComponent* GetComponent() const { return Component; }
     const FAABB& GetBounds() const { return Bounds; }
     const FMatrix& GetLocalToWorld() const { return LocalToWorld; }
+    uint64 GetTransformRevision() const { return TransformRevision; }
     const FMatrix& GetWorldToLocal() const { return WorldToLocal; }
     const FLODSphere& GetLODSphere() const { return LODSphere; }
     UStaticMesh* GetMesh() const { return Mesh; }
@@ -41,6 +42,7 @@ private:
     TSharedPtr<const FMeshRenderState> RenderState;
     FMatrix LocalToWorld;
     FMatrix WorldToLocal;
+    uint64 TransformRevision = 0;
     FAABB Bounds;
     FLODSphere LODSphere;
     int32 PackedIndex = INDEX_NONE;

@@ -6,6 +6,8 @@
 #include "RenderingInfo.h"
 #include "Core/Windows/WindowsPlatformTime.h"
 
+#include <algorithm>
+
 constexpr uint32 MaxShadowInfos = 64;
 
 constexpr uint32 MinShadowAtlasSize = 1024;
@@ -432,6 +434,43 @@ void FShadowRenderer::BeginShadowPass()
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
+void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShadowCasterState>& CasterStates)
+{
+	FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
+	Frame.RequestedCasterStates = CasterStates;
+	auto& Requested = Frame.RequestedCasterStates;
+
+	// 수집 순서가 달라도 같은 집합으로 비교한다.
+	std::sort(Requested.begin(), Requested.end(), [](const auto& Left, const auto& Right)
+	{
+		return Left.CasterID < Right.CasterID;
+	});
+
+	// 이미 Dirty여도 렌더링 후 저장할 이번 목록은 위에서 확보한다.
+	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
+	{
+		return;
+	}
+
+	const FShadowCacheEntry* Cache = ShadowCache.Find(Frame.Key);
+	assert(Cache);
+
+	const auto& Rendered = Cache->RenderedCasterStates;
+	const bool bSameCasters = std::equal(
+		Rendered.begin(), Rendered.end(), Requested.begin(), Requested.end(),
+		[](const FShadowCasterState& Previous, const FShadowCasterState& Current)
+		{
+			return Current.TransformRevision != 0 &&
+				Previous.CasterID == Current.CasterID &&
+				Previous.TransformRevision == Current.TransformRevision;
+		});
+
+	if (!bSameCasters)
+	{
+		DirtyShadowIndices.Add(ShadowInfoIndex);
+	}
+}
+
 void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
 {
 	const FShadowFrameEntry& Frame = ShadowFrameEntries[ShadowInfoIndex];
@@ -471,6 +510,8 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
 	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
+	// 깊이를 다시 그린 뒤에만 캐시의 Caster 기록을 교체한다.
+	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
 }
 

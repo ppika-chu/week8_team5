@@ -974,6 +974,16 @@ void UEditorEngine::RenderShadowPass()
 	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
 
 	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
+	TArray<FShadowCasterState> CasterStates;
+
+	// 조기 반환 전에 집합과 월드 변환을 검사해야 캐시의 유효성을 확인할 수 있다.
+	for (uint32 ShadowInfoIndex = 0; ShadowInfoIndex < static_cast<uint32>(ShadowInfos.Num()); ++ShadowInfoIndex)
+	{
+		const FMatrix& LightViewProj = ShadowInfos[ShadowInfoIndex].LightViewProj;
+		MultipleViewportsAdapter.CollectShadowCasterStates(LightViewProj, CasterStates);
+		ShadowRenderer->UpdateCasterSet(ShadowInfoIndex, CasterStates);
+	}
+
 	const TArray<uint32>& ShadowDirtyIndices = ShadowRenderer->GetDirtyShadowIndices();
 	if (ShadowDirtyIndices.Num() == 0)
 	{

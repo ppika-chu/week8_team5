@@ -5,6 +5,23 @@
 #include "Render/Mesh.h"
 #include "Engine/Scene.h"
 
+static bool AreWorldMatricesEqual(const FMatrix& Previous, const FMatrix& Current)
+{
+    // FMatrix의 비교 연산자는 오차를 허용하므로 원소를 정확히 비교한다.
+    for (int32 Row = 0; Row < 4; ++Row)
+    {
+        for (int32 Column = 0; Column < 4; ++Column)
+        {
+            if (Previous.M[Row][Column] != Current.M[Row][Column])
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 FPrimitiveSceneProxy::~FPrimitiveSceneProxy()
 {
     if (Mesh) Mesh->UnregisterProxy(this);
@@ -27,7 +44,16 @@ void FPrimitiveSceneProxy::OnMeshDestroyed()
 
 void FPrimitiveSceneProxy::UpdateTransform()
 {
-    LocalToWorld = Component->GetWorldMatrix();
+    const FMatrix NewLocalToWorld = Component->GetWorldMatrix();
+    const bool bFirstUpdate = TransformRevision == 0;
+    const bool bTransformChanged = bFirstUpdate || !AreWorldMatricesEqual(LocalToWorld, NewLocalToWorld);
+
+    if (bTransformChanged)
+    {
+        ++TransformRevision;
+    }
+
+    LocalToWorld = NewLocalToWorld;
     WorldToLocal = LocalToWorld.Inverse();
     const FBox LocalBounds = Mesh ? Mesh->GetRenderBounds() : Component->CalcLocalBounds();
     Bounds = MakeWorldBounds(LocalBounds.GetWorldAABB(LocalToWorld));

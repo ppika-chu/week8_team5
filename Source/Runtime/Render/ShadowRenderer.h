@@ -3,6 +3,7 @@
 #include "Texture2D.h"
 #include "RenderPacket.h"
 #include "ShadowAtlas.h"
+#include "ShadowCasterState.h"
 #include "Core/Stats/ShadowStats.h"
 
 class FRenderer;
@@ -94,6 +95,8 @@ struct FShadowCacheEntry
 	FMatrix RenderedLightViewProj;
 
 	uint64 RenderedRevision = 0;
+	// 현재 깊이 텍스처를 만들 때 참여한 Caster와 월드 변환 Revision.
+	TArray<FShadowCasterState> RenderedCasterStates;
 	bool bHasRenderedContent = false;
 };
 
@@ -101,6 +104,8 @@ struct FShadowFrameEntry
 {
 	FShadowKey Key{};
 	uint64 RequestedRevision = 0;
+	// 이번 맵 생성에 필요한 Caster와 월드 변환 Revision.
+	TArray<FShadowCasterState> RequestedCasterStates;
 };
 
 class FShadowRenderer
@@ -117,6 +122,7 @@ public:
 		uint64 SceneID,
 		TArray<FLightShadowData>&& Lights,
 		uint32 LightSlotCount);
+	void UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShadowCasterState>& CasterStates);
 	void BeginShadowPass();
 	void OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex);
 	void EndShadowPass();
