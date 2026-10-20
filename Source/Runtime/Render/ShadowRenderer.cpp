@@ -418,13 +418,13 @@ void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShad
 	Frame.RequestedCasterStates = CasterStates;
 	auto& Requested = Frame.RequestedCasterStates;
 
-	// 수집 순서가 달라도 같은 집합으로 비교한다.
+	// ?�집 ?�서가 ?�라??같�? 집합?�로 비교?�다.
 	std::sort(Requested.begin(), Requested.end(), [](const auto& Left, const auto& Right)
 	{
 		return Left.CasterID < Right.CasterID;
 	});
 
-	// 이미 Dirty여도 렌더링 후 저장할 이번 목록은 위에서 확보한다.
+	// ?��? Dirty?�도 ?�더�????�?�할 ?�번 목록?� ?�에???�보?�다.
 	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
 	{
 		return;
@@ -488,7 +488,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
 	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
-	// 깊이를 다시 그린 뒤에만 캐시의 Caster 기록을 교체한다.
+	// 깊이�??�시 그린 ?�에�?캐시??Caster 기록??교체?�다.
 	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
 }

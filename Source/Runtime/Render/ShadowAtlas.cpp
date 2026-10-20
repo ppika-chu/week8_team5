@@ -108,7 +108,9 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
 		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
 	};
 
-	auto NewTexture = RenderCommand::CreateTexture2D(Desc);
+	// Always create a new texture as a texture 2d array
+	auto NewTexture = RenderCommand::CreateTexture2D(Desc, nullptr, true);
+	assert(NewTexture->GetDimension() == ETextureDimension::Texture2DArray);
 
 	if (!NewTexture || !NewTexture->GetDSV() || !NewTexture->GetSRV())
 	{
@@ -118,7 +120,7 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
 	if (Texture)
 	{
 		RenderCommand::UnbindShaderResource(
-			12,
+			13,
 			EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 	}
 

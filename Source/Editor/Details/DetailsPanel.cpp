@@ -934,7 +934,8 @@ void FDetailsPanel::OnRender()
 						ImGui::SeparatorText("Shadow Maps");
 						for (int i = 0; i < ShadowInfos.Num(); ++i)
 						{
-							if (AtlasTexture && AtlasTexture->GetSRV())
+							if (AtlasTexture && AtlasTexture->GetSRV() &&
+								AtlasTexture->GetDimension() == ETextureDimension::Texture2D)
 							{
 								FVector2 AtlasOffset = ShadowInfos[i].AtlasOffset;
 								FVector2 AtlasScale = ShadowInfos[i].AtlasScale;

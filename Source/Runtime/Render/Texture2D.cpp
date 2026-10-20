@@ -9,13 +9,29 @@ FTexture2D::FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc,
 {
 }
 
-FTexture2D::FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc, const void* InitialData, uint32 RowPitch)
+FTexture2D::FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc, const void* InitialData, uint32 RowPitch, bool bFroceArrayView)
 {
 	Width = InDesc.Width;
 	Height = InDesc.Height;
 	Depth = 1;
 	Format = InDesc.Format;
-	Dimension = ETextureDimension::Texture2D;
+
+	if (bFroceArrayView)
+	{
+		Dimension = ETextureDimension::Texture2DArray;
+	}
+	else if (InDesc.MiscFlags & D3D11_RESOURCE_MISC_TEXTURECUBE)
+	{
+		Dimension = ETextureDimension::TextureCube;
+	}
+	else if (InDesc.ArraySize > 1)
+	{
+		Dimension = ETextureDimension::Texture2DArray;
+	}
+	else
+	{
+		Dimension = ETextureDimension::Texture2D;
+	}
 
 	if (InitialData && RowPitch == 0)
 	{
@@ -61,6 +77,7 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 
 	// TYPELESS 깊이 텍스처는 뷰마다 해석할 포맷을 지정해야 한다 (nullptr이면 생성 실패)
 	const bool bTypelessDepth = (InDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || InDesc.Format == DXGI_FORMAT_R32_TYPELESS);
+	const bool bArrayView = Dimension == ETextureDimension::Texture2DArray;
 	D3D11_SHADER_RESOURCE_VIEW_DESC SrvDesc{};
 	D3D11_DEPTH_STENCIL_VIEW_DESC DsvDesc{};
 	switch (InDesc.Format)
@@ -81,10 +98,27 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 
 	if (InDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)
 	{
-		SrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		SrvDesc.Texture2D.MipLevels = 1;
+		if (bArrayView)
+		{
+			SrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+			SrvDesc.Texture2DArray = {
+				.MostDetailedMip = 0,
+				.MipLevels = InDesc.MipLevels == 0
+					? UINT(-1) : InDesc.MipLevels,
+				.FirstArraySlice = 0,
+				.ArraySize = InDesc.ArraySize
+			};
+		}
+		else
+		{
+			SrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			SrvDesc.Texture2D.MipLevels = 1;
+		}
 
-		hr = Device->CreateShaderResourceView(Texture.Get(), bTypelessDepth ? &SrvDesc : nullptr, SRV.GetAddressOf());
+		const D3D11_SHADER_RESOURCE_VIEW_DESC* ViewDesc =
+			(bTypelessDepth || bArrayView) ? &SrvDesc : nullptr;
+
+		hr = Device->CreateShaderResourceView(Texture.Get(), ViewDesc, SRV.GetAddressOf());
 		if (FAILED(hr))
 			HTR_LOG(Error, "[Texture2D] CreateShaderResourceView failed (hr=0x{:08X})", (uint32)hr);
 	}
@@ -99,9 +133,25 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 
 	if (InDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL)
 	{
-		DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (bArrayView)
+		{
+			DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+			DsvDesc.Texture2DArray = {
+				.MipSlice = 0,
+				.FirstArraySlice = 0,
+				.ArraySize = InDesc.ArraySize
+			};
+		}
+		else
+		{
+			DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		
+		}
 
-		hr = Device->CreateDepthStencilView(Texture.Get(), bTypelessDepth ? &DsvDesc : nullptr, DSV.GetAddressOf());
+		const D3D11_DEPTH_STENCIL_VIEW_DESC* ViewDesc =
+			(bTypelessDepth || bArrayView) ? &DsvDesc : nullptr;
+
+		hr = Device->CreateDepthStencilView(Texture.Get(), ViewDesc, DSV.GetAddressOf());
 		if (FAILED(hr))
 			HTR_LOG(Error, "[Texture2D] CreateDepthStencilView failed (hr=0x{:08X})", (uint32)hr);
 	}

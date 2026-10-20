@@ -143,7 +143,7 @@ struct FLightShadowRange
     uint bDebugCascades;
 };
 
-Texture2D<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
+Texture2DArray<float> ShadowMapAtlas : register(t13); // 0 ~ 1 깊이
 StructuredBuffer<FShadowInfo> ShadowInfos : register(t14);
 StructuredBuffer<FLightShadowRange> LightShadowRanges : register(t15);
 SamplerState PointSampler : register(s1);
@@ -307,8 +307,8 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         if (Det != 0.0f)
             InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
 #endif
-    uint TexelCountX, TexelCountY;
-    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
+    uint TexelCountX, TexelCountY, LayerCount;
+    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY, LayerCount);
     float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
     float2 MaxSampleRadius = 40.0f * TexelStep;
     SearchCasterRadius = min(SearchCasterRadius, MaxSampleRadius);
@@ -327,7 +327,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         if (any(SampleUV < TileMinUV) || any(SampleUV >= TileMaxUV))
             continue;
         float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
-        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, SampleUV, 0);
+        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, 0.0f), 0);
         if (DepthSampled < ReceiverDepth)
         {
             BlockAverage += DepthSampled;
@@ -338,7 +338,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     if (DepthCount > 0)
     {
         BlockAverage /= DepthCount;
-        float2 BlockerRadius = max(0.75f * min(Info.PrescaledTangentTheta * (ReceiverUV.z - BlockAverage) * Info.AtlasScale.xy, MaxSampleRadius), 1.5f * TexelStep);
+        float2 BlockerRadius = max(0.75f * min(Info.PrescaledTangentTheta * (ReceiverUV.z - BlockAverage) * Info.AtlasScale.xy, MaxSampleRadius), 0.5f * TexelStep);
         PercentLit = 0.0f;
         uint SampleCount = 0;
         for (uint j = 0; j < CASTER_SAMPLE_COUNT; ++j)
@@ -348,7 +348,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
             if (any(SampleUV < TileMinUV + 0.5f * TexelStep) || any(SampleUV > TileMaxUV - 0.5f * TexelStep))
                 continue;
             float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
-            PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, SampleUV, ReceiverDepth);
+            PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(SampleUV, 0.0f), ReceiverDepth);
             ++SampleCount;
         }
         PercentLit = SampleCount > 0 ? PercentLit / SampleCount : 1.0f;
@@ -446,8 +446,8 @@ float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
     
     const float2 AtlasUV = UV * Info.AtlasScale + Info.AtlasOffset;
     
-    uint Width, Height;
-    ShadowMapAtlas.GetDimensions(Width, Height);
+    uint Width, Height, LayerCount;
+    ShadowMapAtlas.GetDimensions(Width, Height, LayerCount);
     
     const float2 AtlasSize = float2(Width, Height);
 
@@ -457,7 +457,8 @@ float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
 
     const int2 Texel = clamp(int2(AtlasUV * AtlasSize), TileMin, TileMax);
     
-    const float MapDepth = ShadowMapAtlas.Load(int3(Texel, 0));
+    // x, y, array index, mip level
+    const float MapDepth = ShadowMapAtlas.Load(int4(Texel, 0, 0));
     
     return Ndc.z - Info.DepthBias > MapDepth ? 0.0f : 1.0f;
 }

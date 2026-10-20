@@ -10,7 +10,7 @@ class FTexture2D : public FTexture
 {
 public:
 	// RowPitch가 0이면 InDesc.Format에서 계산한다.
-	FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc, const void* InitialData, uint32 RowPitch = 0);
+	FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc, const void* InitialData, uint32 RowPitch = 0, bool bFroceArrayView = false);
 	// 로더가 포맷과 픽치까지 알고 있으므로 그대로 받는다.
 	FTexture2D(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc, const FImageData& Image);
 	// For Swapchain

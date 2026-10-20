@@ -62,10 +62,10 @@ TUniquePtr<FStructuredBuffer> RenderCommand::CreateRWStructuredBuffer(uint32 Str
 	return RenderDevice->CreateRWStructuredBuffer(Stride, Count);
 }
 
-TUniquePtr<FTexture2D> RenderCommand::CreateTexture2D(const D3D11_TEXTURE2D_DESC& Desc, const void* InitialData)
+TUniquePtr<FTexture2D> RenderCommand::CreateTexture2D(const D3D11_TEXTURE2D_DESC& Desc, const void* InitialData, bool bForceArrayView)
 {
 	assert(RenderDevice);
-	return RenderDevice->CreateTexture2D(Desc, InitialData);
+	return RenderDevice->CreateTexture2D(Desc, InitialData, bForceArrayView);
 }
 
 TUniquePtr<FTexture2D> RenderCommand::LoadDDSTexture(const FString& Path) {
