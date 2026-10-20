@@ -772,7 +772,17 @@ void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, F
 {
 	OutQueue.Reset();
 
-	const FFrustumPlanes LightFrustum = ExtractFrustumPlanes(LightViewProj);
+	FFrustumPlanes LightFrustum = ExtractFrustumPlanes(LightViewProj);
+	const auto IsDirectionalLightProjection = [&LightViewProj]()
+	{
+		return LightViewProj.M[0][3] == 0.0f && LightViewProj.M[1][3] == 0.0f && LightViewProj.M[2][3] == 0.0f;
+	};
+	if (IsDirectionalLightProjection())
+	{
+		// 방향광 캐스터는 구 중심에서 광원 쪽으로 최소 5000까지 수집한다.
+		const float HalfDepth = (LightFrustum.Planes[4].Distance + LightFrustum.Planes[5].Distance) * 0.5f;
+		LightFrustum.Planes[4].Distance += std::max(5000.0f - HalfDepth, 0.0f);
+	}
 	
 	// 절두체 검사에 통과한 렌더 대상 ID 모으기
 	CullForView(RenderObjects, LightFrustum, ShadowVisibleIds);

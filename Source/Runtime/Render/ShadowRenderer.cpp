@@ -225,6 +225,7 @@ void FShadowRenderer::SetParameters(
 				},
 				.DepthBias = Light.DepthBias,
 				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
+				.SlopeBias = Light.SlopeBias,
 				});
 
 			ShadowAllocations.Add(Allocation);

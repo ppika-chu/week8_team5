@@ -231,6 +231,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			FLightShadowData Directional{};
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
+			Directional.SlopeBias = Proxy->GetLightComponent()->GetShadowSlopeBias();
 			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
 			Directional.BlendWidth = Shadow.BlendWidth;
 			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;

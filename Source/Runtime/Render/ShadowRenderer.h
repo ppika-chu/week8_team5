@@ -22,6 +22,7 @@ struct FLightShadowData
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
 	float DepthBias;
+	float SlopeBias = 0.0f;
 	float ResolutionScale = 1.0f;
 	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
 	uint32 bDebugCascades = 0;		// Cascade Debug 용
@@ -36,7 +37,8 @@ struct alignas(16) FShadowInfo
 
 	float DepthBias;
 	float PrescaledTangentTheta;
-	float FShadowInfo_padding[2];
+	float SlopeBias;
+	float FShadowInfo_padding;
 };
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기

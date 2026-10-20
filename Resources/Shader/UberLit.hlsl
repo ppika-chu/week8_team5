@@ -129,7 +129,8 @@ struct FShadowInfo
     float2 AtlasScale;
     float DepthBias;
     float PrescaledTangentTheta;
-    float2 FShadowInfo_padding;
+    float SlopeBias;
+    float FShadowInfo_padding;
 };
 
 struct FLightShadowRange
@@ -153,6 +154,11 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 #define CASTER_SEARCH_COUNT 16
 #define CASTER_SAMPLE_COUNT 32
+static const float CSMDepthBias = 10.0f;
+static const float ShadowMaxSlopeScaleDepthBias = 4.0f; // slope 기울기 최대값. tan()차원이므로 1이면 45도보다 기울기 크면 45도로 취급
+#ifndef SHADOW_RECEIVER_PLANE_FROM_NORMAL
+#define SHADOW_RECEIVER_PLANE_FROM_NORMAL 1 // 1: 보간 버텍스 노멀, 0: 위치의 ddx/ddy
+#endif
 static const float2 PoissonDisk[32] =
 {
     float2(0.03586579, -0.59705367),
@@ -254,7 +260,7 @@ FLightContribution SurfaceShading(float3 N, float3 L, float3 V, float3 Radiance,
 #if LIGHTING_MODEL_BLINN_PHONG
     // Blinn Specular
     const float3 H = normalize(L + V);
-    if (dot(N, L) > 0)
+    if (NdotL > 0)
     {
         Contribution.Specular = pow(saturate(dot(normalize(N), H)), max(InShininess, 1.f));
     }
@@ -290,8 +296,27 @@ bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out f
     return all(OutUV >= 0.0f) && all(OutUV <= 1.0f);
 }
 
+float CalcDirectionalShadowBias(FShadowInfo Info, float3 WorldNormal, float2 TileResolution)
+{
+    // SlopeBias는 래스터라이저 동작과 동일(단, 버텍스 노멀을 사용)
+    const float3 LightDepthAxis = float3(Info.LightViewProjection[0].z, Info.LightViewProjection[1].z, Info.LightViewProjection[2].z);
+    const float3 LightUAxis = float3(Info.LightViewProjection[0].x, Info.LightViewProjection[1].x, Info.LightViewProjection[2].x);
+    const float3 LightVAxis = float3(Info.LightViewProjection[0].y, Info.LightViewProjection[1].y, Info.LightViewProjection[2].y);
+    const float2 MapWorldSize = 2.0f / float2(length(LightUAxis), length(LightVAxis));
+    const float DepthRange = rcp(length(LightDepthAxis));
+    const float2 TexelWorldSize = MapWorldSize / TileResolution;
+    const float3 LightNormal = float3(dot(WorldNormal, normalize(LightUAxis)), dot(WorldNormal, normalize(LightVAxis)), dot(WorldNormal, normalize(LightDepthAxis)));
+    // tan(theta) = length(N.xy) / abs(N.z)의 상한을 적용한다.
+    const float ClampedSlopeDivisor = max(abs(LightNormal.z), length(LightNormal.xy) / ShadowMaxSlopeScaleDepthBias);
+    const float2 DepthSlope = abs(LightNormal.xy) / ClampedSlopeDivisor;
+    const float ConstantBias = Info.DepthBias * CSMDepthBias * (TexelWorldSize.x * 0.5f) / DepthRange;
+    const float SlopeBias = max(DepthSlope.x * TexelWorldSize.x, DepthSlope.y * TexelWorldSize.y) / DepthRange;
+    return ConstantBias + SlopeBias * Info.SlopeBias;
+}
+
 // 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
-float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY)
+#if 1
+float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal)
 {
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
     float2 SearchCasterRadius = ReceiverUV.z * Info.PrescaledTangentTheta * Info.AtlasScale.xy;
@@ -299,13 +324,14 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     float3 DuvDy = mul(float4(WorldPosDDY, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
     float Det = DuvDx.x * DuvDy.y - DuvDx.y * DuvDy.x;
     float2x2 InvMatrix = float2x2(0, 0, 0, 0);
-#if !LIGHTING_MODEL_GOURAUD
+#if !LIGHTING_MODEL_GOURAUD || SHADOW_RECEIVER_PLANE_FROM_NORMAL
     //if (abs(Det) >= 1e-9f * Info.AtlasScale.x)
         if (Det != 0.0f)
             InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
 #endif
     uint TexelCountX, TexelCountY;
     ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
+    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
     float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
     float2 MaxSampleRadius = 40.0f * TexelStep;
     SearchCasterRadius = min(SearchCasterRadius, MaxSampleRadius);
@@ -323,7 +349,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         float2 SampleUV = ReceiverUV.xy + OffsetUV;
         if (any(SampleUV < TileMinUV) || any(SampleUV >= TileMaxUV))
             continue;
-        float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
+        float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - ReceiverBias;
         float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, SampleUV, 0);
         if (DepthSampled < ReceiverDepth)
         {
@@ -344,7 +370,8 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
             float2 SampleUV = ReceiverUV.xy + OffsetUV;
             if (any(SampleUV < TileMinUV + 0.5f * TexelStep) || any(SampleUV > TileMaxUV - 0.5f * TexelStep))
                 continue;
-            float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
+            
+            float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - ReceiverBias;
             PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, SampleUV, ReceiverDepth);
             ++SampleCount;
         }
@@ -352,6 +379,16 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     }
     return PercentLit;
 }
+#else
+float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal)
+{
+    float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, UV, 0);
+    uint TexelCountX, TexelCountY;
+    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
+    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
+    return DepthSampled >= Depth - ReceiverBias ? 1.0f : 0.0f;
+}
+#endif
 
 // 픽셀을 cascade index로 반환 (debug용)
 uint FindCascadeIndex(float3 WorldPos)
@@ -367,7 +404,7 @@ uint FindCascadeIndex(float3 WorldPos)
     return Range.Count;
 }
 
-float CalcDirectionalShadow(float3 WorldPos)
+float CalcDirectionalShadow(float3 WorldPos, float3 WorldNormal)
 {
     // Disabled shadow is not included in ShadowInfos.
     // if (!bShadowEnabled) return 1.0f;
@@ -378,8 +415,12 @@ float CalcDirectionalShadow(float3 WorldPos)
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light
 
-    // 캐스케이드 선택 전에 공통 월드 위치를 미분한다. Gouraud의 VS에서는 미분을 사용할 수 없다.
-#if LIGHTING_MODEL_GOURAUD
+    // 노멀 모드에서는 화면 미분 대신 같은 접평면을 나타내는 두 방향을 사용한다.
+#if SHADOW_RECEIVER_PLANE_FROM_NORMAL
+    const float3 ReferenceAxis = abs(WorldNormal.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    const float3 WorldPosDDX = normalize(cross(ReferenceAxis, WorldNormal));
+    const float3 WorldPosDDY = cross(WorldNormal, WorldPosDDX);
+#elif LIGHTING_MODEL_GOURAUD
     const float3 WorldPosDDX = 0.0f;
     const float3 WorldPosDDY = 0.0f;
 #else
@@ -398,7 +439,7 @@ float CalcDirectionalShadow(float3 WorldPos)
             continue;
         
         // 그림자면 0 빛이면 1
-        const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY);
+        const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY, WorldNormal);
 
         // 현재 위치에서 가장자리 위치까지 거리
         const float EdgeDist = min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y));
@@ -414,7 +455,7 @@ float CalcDirectionalShadow(float3 WorldPos)
             return Shadow;      // 혹시라도 이 점을 표현하지 않으면 그대로 반환
         
         // lerp(A, B, t) : t가 0 이면 A, 1이면 B
-        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY), Shadow, EdgeDist / Range.BlendWidth);
+        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY, WorldNormal), Shadow, EdgeDist / Range.BlendWidth);
     }
 
     // 모든 Cascade 밖이면 
@@ -614,14 +655,34 @@ float3 GetHeatmapColor(uint LightCount)
     return saturate(float3(t * 2 - 0.5, 1 - abs(t * 2 - 1), 1.5 - t * 2));
 }
 
+const bool CanContribute(FLightRenderParameters Light, float3 WorldPos, float3 N)
+{
+    if (Light.Type == LIGHT_TYPE_POINT || Light.Type == LIGHT_TYPE_SPOT)
+    {
+        float3 toLight = Light.Position - WorldPos;
+        
+        if (dot(toLight, N) <= 0 || length(toLight) >= Light.Radius)
+            return false;
+        
+        if (Light.Type == LIGHT_TYPE_POINT)
+            return true;
+
+        return dot(normalize(toLight), -Light.Direction) > Light.OuterConeCos;
+    }
+    else
+    {
+        return true;
+    }
+}
+
 // Directional + 로컬 라이트의 Diffuse/Specular를 모두 더한다. Ambient는 포함하지 않는다.
 // bUseLightGrid = true면 SvPosition이 속한 셀의 라이트만, false면 전체 로컬 라이트를 순회한다.
 // VS(Gouraud)는 픽셀 위치가 없어 셀을 쓸 수 없으므로 false로 호출한다.
-FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid)
+FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid, float3 VertexNormal)
 {
     // Directional Light는 처음에 한 번만 계산
     FLightContribution Total = CalcDirectionalLight(N, V, InShininess);
-    const float DirectionalShadow = CalcDirectionalShadow(WorldPos);
+    const float DirectionalShadow = CalcDirectionalShadow(WorldPos, VertexNormal);
     Total.Diffuse *= DirectionalShadow;
     Total.Specular *= DirectionalShadow;
 
@@ -644,8 +705,18 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
     {
         const uint LightIndex = bUseCellList ? CellLightIndices[CellOffset + 1 + Index] : Index;
         const FLightRenderParameters Light = LocalLights[LightIndex];
-        const FLightContribution LightContribution = CalcLocalLight(Light, N, V, WorldPos, InShininess);
-        const float Shadow = CalcLocalShadow(LightIndex, Light, WorldPos);
+        float Shadow = 0.0f;
+        FLightContribution LightContribution = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+        const bool bCanContribute = CanContribute(Light, WorldPos, N);
+        if (!bCanContribute)
+            continue;
+        
+        Shadow = CalcLocalShadow(LightIndex, Light, WorldPos);
+        
+        if (Shadow == 0.0f)
+            continue;
+        
+        LightContribution = CalcLocalLight(Light, N, V, WorldPos, InShininess);
         Total.Diffuse += LightContribution.Diffuse * Shadow;
         Total.Specular += LightContribution.Specular * Shadow;
     }
@@ -670,7 +741,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
     Output.Color = Input.Color;
 #if LIGHTING_MODEL_GOURAUD
     const float3 V = normalize(CameraWorldPos - Output.WorldPos);
-    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false);
+    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, normalize(Output.Normal));
     Output.VertexDiffuse = Contribution.Diffuse;
 #endif
     return Output;
@@ -722,7 +793,7 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     const float3 V = { normalize(CameraWorldPos - Input.WorldPos) };
-    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, Shininess, Input.SvPosition, true) };
+    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, Shininess, Input.SvPosition, true, VertexNormal) };
     DiffuseLighting += Contribution.Diffuse;
     SpecularLighting = Contribution.Specular;
 #elif LIGHTING_MODEL_GOURAUD
