@@ -9,8 +9,22 @@
 #include "PointLightSceneProxy.h"
 #include "Render/ShadowCascade.h"
 
+#include <cmath>
+
 namespace
 {
+	uint32 CalculateShadowResolution(uint32 BaseResolution, float ResolutionScale)
+	{
+		if (!std::isfinite(ResolutionScale) || ResolutionScale <= 0.0f)
+		{
+			return 0;
+		}
+
+		const float ClampedScale = FMath::Clamp(ResolutionScale, 0.1f, 1.0f);
+
+		return static_cast<uint32>(static_cast<float>(BaseResolution) * ClampedScale);
+	}
+
 	float GetPaddedShadowFov(
 		float OriginalFovDegrees,
 		uint32 Resolution,
@@ -207,7 +221,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		// 씬 전체를 감싸는 Ortho 박스. 빈 Scene인 경우 Radius가 0 이므로 Shadow 계산 불가
 		const FBox& Bounds = GetBounds();
 		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
-		if (Radius > 0.0f)
+		const ULightComponent* LightComponent = Proxy->GetLightComponent();
+		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
+		if (Radius > 0.0f && LightComponent->IsCastingShadows() && Resolution > 0)
 		{
 			FVector Forward, Right, Up;
 			Proxy->GetShadowBasis(Forward,Right, Up);
@@ -232,10 +248,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			Directional.LightID = Proxy->GetLightComponent()->GetUUID();
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
-			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
+			Directional.Resolution = Resolution;
 			Directional.BlendWidth = Shadow.BlendWidth;
 			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;
-			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			
 			// Cascade별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
 			// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.
@@ -263,16 +278,18 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		const ULightComponent* LightComponent = LightProxy->GetLightComponent();
 		const float NearZ = 0.1f;
 		const float FarZ = LightParameter.Radius;
+		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
 
-		if (LightProxy->IsVisible() == false || FarZ <= NearZ)
+		if (!LightProxy->IsVisible() || !LightComponent->IsCastingShadows() || FarZ <= NearZ || Resolution == 0)
+		{
 			continue;
+		}
 
 		FLightShadowData Local{};
 		Local.LightID = LightComponent->GetUUID();
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
-		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
-		const uint32 Resolution = Local.ResolutionScale * DefaultShadowResolution;
+		Local.Resolution = Resolution;
 
 		// 맵별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
 		// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.

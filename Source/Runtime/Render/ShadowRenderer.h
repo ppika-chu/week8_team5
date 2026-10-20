@@ -28,7 +28,7 @@ struct FLightShadowData
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
 	float DepthBias;
-	float ResolutionScale = 1.0f;
+	uint32 Resolution = DefaultShadowResolution;
 	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
 	uint32 bDebugCascades = 0;		// Cascade Debug 용
 	bool bAlwaysUpdate = false; 	// Shadow Map을 항상 업데이트할지 여부
@@ -49,6 +49,7 @@ struct alignas(16) FShadowInfo
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
 struct FShadowSettings
 {
+	uint32 BaseResolution = DefaultShadowResolution;
 	float  Distance     = 50.0f;
 	uint32 NumCascades  = 1;
 	float  SplitLambda  = 0.7f;

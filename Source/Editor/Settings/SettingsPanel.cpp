@@ -50,6 +50,7 @@ void FSettingsPanel::OnRender()
 	ImGui::Combo("Light Culling", &Settings.LightCullingMode, "Tiled\0Clustered\0Tiled 2.5D\0");
 	const char* Models[] = { "Gouraud", "Lambert", "Blinn-Phong" };
 	ImGui::Combo("Lighting Model", &Settings.LightingModel, Models, IM_ARRAYSIZE(Models));
+	ImGui::Combo("Shadow Resolution", &Settings.ShadowResolutionQuality, "Low (512)\0Medium (1024)\0High (2048)\0Ultra (4096)\0");
 	ImGui::SliderInt("Cascades", &Settings.NumCascades, 1, 4);
 	ImGui::SliderFloat("Shadow Distance", &Settings.ShadowDistance, 5.0f, 500.0f, "%.0f");
 	ImGui::SliderFloat("Cascade Split", &Settings.CascadeSplitLambda, 0.0f, 1.0f, "%.2f");
@@ -131,6 +132,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
 	File << "LightingModel=" << Settings.LightingModel << "\n";
+	File << "ShadowResolutionQuality=" << Settings.ShadowResolutionQuality << "\n";
 	File << "\n";
 
 	File << "[Editor]\n";
@@ -253,6 +255,16 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
 				else if (Key == "LightingModel") Settings.LightingModel = std::stoi(ValueStr);
+				else if (Key == "ShadowResolutionQuality")
+				{
+					std::istringstream Number(ValueStr);
+					int32 ShadowQualityIndex = 0;
+
+					if ((Number >> ShadowQualityIndex) && (Number >> std::ws).eof() && ShadowQualityIndex >= 0 && ShadowQualityIndex <= 3)
+					{
+						Settings.ShadowResolutionQuality = ShadowQualityIndex;
+					}
+				}
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
 				else if (Key == "CameraRotateSensitivity") Settings.MouseSensitivity = std::stof(ValueStr);

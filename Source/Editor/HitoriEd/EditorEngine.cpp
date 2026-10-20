@@ -422,7 +422,10 @@ void UEditorEngine::RenderMultipleViewports()
 
 	// 런타임 그림자 설정. 한 프레임 동안 같은 값을 쓴다.
 	const FEditorSettings& EditorSettings = SettingsPanel->GetSettings();
+	constexpr uint32 ShadowResolutionLevels[] = { 512, 1024, 2048, 4096 };
+	const int32 ShadowQualityIndex = FMath::Clamp(EditorSettings.ShadowResolutionQuality, 0, 3);
 	const FShadowSettings ShadowSettings{
+		.BaseResolution = ShadowResolutionLevels[ShadowQualityIndex],
 		.Distance       = EditorSettings.ShadowDistance,
 		.NumCascades    = static_cast<uint32>(EditorSettings.NumCascades),
 		.SplitLambda    = EditorSettings.CascadeSplitLambda,

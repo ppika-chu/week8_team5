@@ -111,32 +111,16 @@ void FShadowRenderer::SetParameters(
 		CachedSceneID = SceneID;
 	}
 
-	// Validate resolution scale and clamp to [0.1, 1.0]
-	for (FLightShadowData& Light : Lights)
+	// Sort lights by final resolution (descending) to allocate larger shadow maps first
+	std::sort(Lights.begin(), Lights.end(), [](const FLightShadowData& A, const FLightShadowData& B)
 	{
-		if (!std::isfinite(Light.ResolutionScale) ||
-			Light.ResolutionScale <= 0.0f)
+		if (A.Resolution != B.Resolution)
 		{
-			Light.ResolutionScale = 0.0f;
-			continue;
+			return A.Resolution > B.Resolution;
 		}
 
-
-		Light.ResolutionScale =
-			FMath::Clamp(Light.ResolutionScale, 0.1f, 1.0f);
-	}
-
-	// Sort lights by resolution scale (descending) to allocate larger shadow maps first
-	std::sort(Lights.begin(), Lights.end(),
-		[](const FLightShadowData& A, const FLightShadowData& B)
-		{
-			if (A.ResolutionScale != B.ResolutionScale)
-			{
-				return A.ResolutionScale > B.ResolutionScale;
-			}
-
-			return A.LightID < B.LightID;
-		});
+		return A.LightID < B.LightID;
+	});
 
 	struct FShadowRequest
 	{
@@ -168,7 +152,7 @@ void FShadowRenderer::SetParameters(
 		const FLightShadowData& Light = Lights[LightIndex];
 
 		if (Light.LightSlotIndex >= SlotCount ||
-			Light.ResolutionScale <= 0.0f ||
+			Light.Resolution == 0 ||
 			AcceptedSlots[Light.LightSlotIndex] != 0 || // Check if the slot is already accepted
 			AcceptedLightIDs.Contains(Light.LightID)) // Check if the light ID is already accepted
 		{
@@ -184,13 +168,7 @@ void FShadowRenderer::SetParameters(
 			continue;
 		}
 
-		const uint32 Resolution = static_cast<uint32>(
-			Light.ResolutionScale * DefaultShadowResolution);
-
-		if (Resolution == 0)
-		{
-			continue;
-		}
+		const uint32 Resolution = Light.Resolution;
 
 		AcceptedSlots[Light.LightSlotIndex] = 1;
 		AcceptedLightIDs.Add(Light.LightID, true);

@@ -7,7 +7,6 @@
 
 static bool AreWorldMatricesEqual(const FMatrix& Previous, const FMatrix& Current)
 {
-    // FMatrix의 비교 연산자는 오차를 허용하므로 원소를 정확히 비교한다.
     for (int32 Row = 0; Row < 4; ++Row)
     {
         for (int32 Column = 0; Column < 4; ++Column)
