@@ -3,6 +3,7 @@
 
 #include "imgui_internal.h"
 #include "Editor/HitoriEd/EditorDragDrop.h"
+#include "Editor/EditorUI/ImGuiRenderer.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -917,6 +918,7 @@ void FDetailsPanel::OnRender()
 			}
 
 			// Show shadow maps
+			assert(ImGuiRenderer);
 			if (auto* LightComponent = Cast<ULightComponent>(TargetComponent))
 			{
 				if (!ShadowRenderer)
@@ -934,21 +936,35 @@ void FDetailsPanel::OnRender()
 						ImGui::SeparatorText("Shadow Maps");
 						for (int i = 0; i < ShadowInfos.Num(); ++i)
 						{
-							if (AtlasTexture && AtlasTexture->GetSRV() &&
-								AtlasTexture->GetDimension() == ETextureDimension::Texture2D)
+							if (!ImGuiRenderer ||
+								!AtlasTexture ||
+								!AtlasTexture->GetSRV())
 							{
-								FVector2 AtlasOffset = ShadowInfos[i].AtlasOffset;
-								FVector2 AtlasScale = ShadowInfos[i].AtlasScale;
-								const ImVec2 uv0(AtlasOffset.X, AtlasOffset.Y);
-								const ImVec2 uv1(AtlasOffset.X + AtlasScale.X, AtlasOffset.Y + AtlasScale.Y);
-
-								ImGui::Text("Shadow Map %d", i);
-								ImGui::Image(
-									(ImTextureID)AtlasTexture->GetSRV(),
-									ImVec2(256, 256),
-									uv0,
-									uv1);
+								continue;
 							}
+
+							const FShadowInfo& Info = ShadowInfos[i];
+
+							const ImVec2 UV0(
+								Info.AtlasOffset.X,
+								Info.AtlasOffset.Y);
+
+							const ImVec2 UV1(
+								Info.AtlasOffset.X + Info.AtlasScale.X,
+								Info.AtlasOffset.Y + Info.AtlasScale.Y);
+
+							ImGui::Text(
+								"Shadow Map %d / Layer %u",
+								i,
+								static_cast<unsigned int>(Info.ArrayIndex));
+
+							ImGuiRenderer->ImageTextureArray(
+								AtlasTexture->GetSRV(),
+								Info.ArrayIndex,
+								ImVec2(256, 256),
+								UV0,
+								UV1,
+								true);
 						}
 					}
 					else
