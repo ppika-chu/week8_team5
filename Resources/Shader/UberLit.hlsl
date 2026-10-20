@@ -85,6 +85,9 @@ cbuffer PerObjectConstants : register(b2)
 {
     matrix World;
     matrix WorldInverseTranspose; // (World^-1)^T
+
+    uint bReceiveShadows;
+    uint3 PerObjectPadding;
 };
 
 // b3는 FireBall이 쓰는 동안 비워 둔다.
@@ -369,6 +372,11 @@ uint FindCascadeIndex(float3 WorldPos)
 
 float CalcDirectionalShadow(float3 WorldPos)
 {
+    if (bReceiveShadows == 0)
+    {
+        return 1.0f;
+    }
+
     // Disabled shadow is not included in ShadowInfos.
     // if (!bShadowEnabled) return 1.0f;
     
@@ -473,6 +481,11 @@ float CalcLocalShadow(
     FLightRenderParameters Light,
     float3 WorldPos)
 {
+    if (bReceiveShadows == 0)
+    {
+        return 1.0f;
+    }
+
     if (Light.Type != LIGHT_TYPE_POINT &&
         Light.Type != LIGHT_TYPE_SPOT)
     {
@@ -730,7 +743,8 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 #endif
 
     // Cascade 디버그
-    if (LightShadowRanges[0].bDebugCascades != 0)
+    if (bReceiveShadows != 0 &&
+        LightShadowRanges[0].bDebugCascades != 0)
     {
         static const float3 CascadeColors[5] = {
             // 연한 빨강, 연한 초록, 연학 파랑, 연한 노랑, 흰색 (Cascade 없는 곳은 원래 색)

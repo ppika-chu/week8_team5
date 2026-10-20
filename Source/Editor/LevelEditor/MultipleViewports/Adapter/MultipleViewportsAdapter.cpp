@@ -785,6 +785,15 @@ void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, F
         auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
 		if (!StaticComponent || !StaticComponent->GetStaticMesh() || StaticComponent->IsEditorIcon()) continue;
 
+		const FPrimitiveSceneProxy* Proxy = StaticComponent->GetSceneProxy();
+		const bool bCastShadows = Proxy
+			? Proxy->IsCastingShadows()
+			: StaticComponent->IsCastingShadows();
+		if (!bCastShadows)
+		{
+			continue;
+		}
+
 		StaticComponent->SubmitToRenderQueue(OutQueue, 0);		// LOD 0
 	}
 }

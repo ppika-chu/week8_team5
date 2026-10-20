@@ -14,17 +14,27 @@ constexpr uint32 ObjectSlotBytes = 256;
 
 enum class ELightCullingMode : uint32 { Tiled, Clustered, Tiled25D };
 
-struct FPerObjectConstants
+struct alignas(16) FPerObjectConstants
 {
 	FMatrix World;
 	// (World^-1)^T. 비균등 스케일에서도 노멀이 표면에 수직으로 남도록 노멀 변환에 쓴다.
 	FMatrix NormalMatrix;
+	uint32 bReceiveShadows = 1;
+	uint32 Padding[3] = {};
 };
+static_assert(sizeof(FPerObjectConstants) == 144, "UberLit.hlsl cbuffer PerObjectConstants 크기와 맞아야 한다");
 
 // 오브젝트 칸 하나를 채운다. 프록시는 WorldToLocal을 이미 들고 있어 역행렬 계산을 건너뛸 수 있다.
-inline void WritePerObjectConstants(uint8* Dest, const FMatrix& World, const FMatrix& WorldToLocal)
+inline void WritePerObjectConstants(
+	uint8* Dest,
+	const FMatrix& World,
+	const FMatrix& WorldToLocal,
+	bool bReceiveShadows)
 {
-	const FPerObjectConstants Constants{ World, WorldToLocal.GetTransposed() };
+	FPerObjectConstants Constants{};
+	Constants.World = World;
+	Constants.NormalMatrix = WorldToLocal.GetTransposed();
+	Constants.bReceiveShadows = bReceiveShadows ? 1u : 0u;
 	std::memcpy(Dest, &Constants, sizeof(Constants));
 }
 
@@ -249,7 +259,9 @@ public:
 private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection);
 	void DrawStaticGroups();
-	void UpdatePerObjectConstants(const FMatrix& World);
+	void UpdatePerObjectConstants(
+		const FMatrix& World,
+		bool bReceiveShadows = true);
 	void BindMaterial(UMaterial* Material);
 	void UpdateMaterialParams(const FRenderPacket& RenderPacket);
 	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);

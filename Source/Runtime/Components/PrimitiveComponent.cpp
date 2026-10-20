@@ -49,6 +49,17 @@ void UPrimitiveComponent::BeginPlay()
 	Super::BeginPlay();
 }
 
+void UPrimitiveComponent::PostEditChangeProperty(const FProperty& Property)
+{
+	Super::PostEditChangeProperty(Property);
+
+	if (Property.Name == "bCastShadows" ||
+		Property.Name == "bReceiveShadows")
+	{
+		MarkRenderStateDirty();
+	}
+}
+
 
 void UPrimitiveComponent::SubmitToRenderQueue(FRenderQueue& RenderQueue)
 {

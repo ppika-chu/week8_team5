@@ -16,6 +16,7 @@
 #include "Render/ToneMapRenderer.h"
 #include "Render/DepthViewRenderer.h"
 #include "Render/ShadowRenderer.h"
+#include "Render/ShadowGpuProfiler.h"
 
 #include "Editor/EditorUI/EditorUI.h"
 #include "Editor/OutputLog/OutputLogPanel.h"
@@ -71,6 +72,7 @@ public:
 	void EndPlayMap();
 
 	bool IsPlaying() const { return PlayWorld != nullptr; }
+	FShadowFrameStats GetFrameShadowStats() const;
 
 	////FEditorDelegates::PrePIEEnded / EndPIE.Broadcast()
 	//void TeardownPlaySession(const FWorldContext& PIEContext);            // 액터 EndPlay, 월드 정리(CleanupWorld)
@@ -122,6 +124,8 @@ private:
 	void RenderIconPass(int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderIconQueue, FRenderQueue& ArrowQueue);
 	//Shadow Pass
 	void RenderShadowPass();	// 전체 light render pass
+	void BeginShadowStatsForView(int32 ViewIndex);
+	void RecordShadowViewStats(int32 ViewIndex);
 
 	FWorldContext& GetEditorWorldContext();
 	FWorldContext* GetPIEWorldContext(int32 WorldPIEInstance = 0);
@@ -152,6 +156,10 @@ private:
 	TUniquePtr<FToneMapRenderer> ToneMapRenderer;
 	TUniquePtr<FDepthViewRenderer> DepthViewRenderer;
 	TUniquePtr<FShadowRenderer> ShadowRenderer;
+	FShadowRenderStats ViewShadowStats[MaxShadowStatsViewCount]{};
+	bool bShadowViewStatsValid[MaxShadowStatsViewCount]{};
+	uint64 ShadowStatsFrameNumber = 0;
+	FShadowGpuProfiler ShadowGpuProfiler;
 
 	UFont* SystemFont;
 
