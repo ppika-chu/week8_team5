@@ -196,7 +196,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 	}
 	
 	TArray<FLightShadowData> Lights;
-	if (const FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
+	if (FDirectionalLightSceneProxy* Proxy = GetMainDirectionalLight())    // 셰이더는 하나만 받음
 	{
 		FLightRenderParameters P;
 		Proxy->GetLightShaderParameters(P);
@@ -229,6 +229,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
 			
 			FLightShadowData Directional{};
+			Directional.LightID = Proxy->GetLightComponent()->GetUUID();
 			Directional.LightSlotIndex = 0;
 			Directional.DepthBias = Proxy->GetLightComponent()->GetShadowBias();
 			Directional.ResolutionScale = Proxy->GetLightComponent()->GetShadowResolutionScale();
@@ -236,13 +237,16 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;
 			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			
+			// TODO: 필요할 때만 리비전을 늘리도록 한다.
+			Proxy->UpdateShadowRevision();
 			for (uint32 i = 0; i < Count; ++i)
 			{
 				FVector Corners[8];
 				GetSliceCorners(Near, Far, CamNear, CamFar, Splits[i], Splits[i+1], Corners);
-				Directional.Maps.Add(FShadowData{
-					FitCascade(Corners, Forward, Right, Up, Resolution),
-				});
+				FShadowData ShadowData = FitCascade(Corners, Forward, Right, Up, Resolution);
+				ShadowData.Revision = Proxy->GetShadowRevision();
+
+				Directional.Maps.Add(ShadowData);
 			}
 			Lights.Add(Directional);
 		}
@@ -263,11 +267,14 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			continue;
 
 		FLightShadowData Local{};
+		Local.LightID = LightComponent->GetUUID();
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
 		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
 		const uint32 Resolution = Local.ResolutionScale * DefaultShadowResolution;
 
+		// TODO: 필요할 때만 리비전을 늘리도록 한다.
+		LightProxy->UpdateShadowRevision();
 		switch (LightComponent->GetLightType())
 		{
 		case ELightType::Spot:
@@ -285,6 +292,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 
 			FShadowData ShadowData{};
 			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), ShadowFov, NearZ, FarZ);
+			ShadowData.Revision = LightProxy->GetShadowRevision();
 
 			Local.Maps.Add(ShadowData);
 
@@ -298,6 +306,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			{
 				FShadowData ShadowData{};
 				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, ShadowFov, NearZ, FarZ);
+				ShadowData.Revision = LightProxy->GetShadowRevision();
 
 				Local.Maps.Add(ShadowData);
 			}
@@ -316,12 +325,12 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
-	ShadowRenderer->SetParameters(std::move(Lights), MaxDirectionalLights + MaxLocalLights);
+	ShadowRenderer->SetParameters(0, std::move(Lights), MaxDirectionalLights + MaxLocalLights);
 }
 
-const FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight() const
+FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight()
 {
-	for (const FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
+	for (FDirectionalLightSceneProxy* Proxy : DirectionalLightProxies)
 	{
 		if (Proxy->IsVisible())	return Proxy;
 	}

@@ -45,7 +45,10 @@ FRenderDevice::FRenderDevice()
 	{
 		D3D11_FEATURE_DATA_D3D11_OPTIONS Options{};
 		if (SUCCEEDED(Device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &Options, sizeof(Options))))
+		{
 			bConstantBufferOffsetting = Options.ConstantBufferOffsetting == TRUE;
+			bClearViewSupported = Options.ClearView == TRUE;
+		}
 	}
 	HTR_LOG(Info, "Constant buffer offsetting: {}", bConstantBufferOffsetting ? "on" : "off");
 

@@ -179,6 +179,11 @@ bool RenderCommand::SupportsConstantBufferOffsets()
 	return RenderDevice->GetContext1() != nullptr;
 }
 
+bool RenderCommand::SupportsClearView()
+{
+	return RenderDevice->GetClearViewContext() != nullptr;
+}
+
 void RenderCommand::BindConstantBufferRange(uint32 Slot, FConstantBuffer* ConstantBuffer, uint32 FirstConstant, uint32 NumConstants, EShaderBindFlagBits FlagBits)
 {
 	ID3D11DeviceContext1* Context = RenderDevice->GetContext1();
@@ -271,6 +276,55 @@ void RenderCommand::ClearDepthStencil(FTexture2D* DepthStencilTexture, float Dep
 	}
 
 	RenderDevice->GetContext()->ClearDepthStencilView(DepthStencilTexture->GetDSV(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, Depth, Stencil);
+}
+
+bool RenderCommand::ClearDepthRegion(FTexture2D* DepthTexture,
+	uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth)
+{
+	ID3D11DeviceContext1* Context = RenderDevice->GetClearViewContext();
+
+	if (!Context || !DepthTexture || !DepthTexture->GetDSV())
+	{
+		return false;
+	}
+
+	if (Width == 0 || Height == 0)
+	{
+		return false;
+	}
+
+	if (X >= DepthTexture->GetWidth() ||
+		Y >= DepthTexture->GetHeight())
+	{
+		return false;
+	}
+
+	D3D11_DEPTH_STENCIL_VIEW_DESC Desc{};
+	DepthTexture->GetDSV()->GetDesc(&Desc);
+
+	if (Desc.Format != DXGI_FORMAT_D32_FLOAT)
+	{
+		return false;
+	}
+
+	const D3D11_RECT Rect{
+		.left = static_cast<LONG>(X),
+		.top = static_cast<LONG>(Y),
+		.right = static_cast<LONG>(X + Width),
+		.bottom = static_cast<LONG>(Y + Height)
+	};
+
+	const FLOAT ClearValue[4]{
+		Depth, 0.0f, 0.0f, 0.0f
+	};
+
+	Context->ClearView(
+		DepthTexture->GetDSV(),
+		ClearValue,
+		&Rect,
+		1);
+
+	return true;
 }
 
 void RenderCommand::SetViewport(uint32 InX, uint32 InY, uint32 InWidth, uint32 InHeight)

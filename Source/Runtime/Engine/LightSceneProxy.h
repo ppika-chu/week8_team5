@@ -27,6 +27,9 @@ public:
 	const ULightComponent* GetLightComponent() const { return LightComponent; }
 	bool IsVisible() const { return LightComponent->IsVisible(); }
 
+	uint64 GetShadowRevision() const { return ShadowRevision; }
+	void UpdateShadowRevision() { ++ShadowRevision; }
+
 protected:
 	const ULightComponent* LightComponent = nullptr;
 
@@ -34,6 +37,9 @@ private:
 	friend class FScene;
 	FScene* Scene = nullptr;
     int32 PackedIndex = INDEX_NONE;
+
+	// Revision is updated when the shadow map should be re-rendered.
+	uint64 ShadowRevision = 0;
 };
 
 

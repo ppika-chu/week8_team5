@@ -13,12 +13,16 @@ struct FShadowData
 	FMatrix LightViewProj;
 	float Depth = 0.0f;
 	float Width = 0.0f;
+
+	uint64 Revision = 0;
 };
 
 // Data delivered from FScene
 // Light 한 개당 
 struct FLightShadowData
 {
+	uint64 LightID = 0;			// UUID
+
 	uint32 LightSlotIndex;		// Index for LightShadowRanges
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
@@ -26,6 +30,7 @@ struct FLightShadowData
 	float ResolutionScale = 1.0f;
 	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
 	uint32 bDebugCascades = 0;		// Cascade Debug 용
+	bool bAlwaysUpdate = false; 	// Shadow Map을 항상 업데이트할지 여부
 };
  
 // 맵 한 장의 Atlas 정보
@@ -58,12 +63,50 @@ struct alignas(16) FLightShadowRange
 	uint32 bDebugCascades;
 };
 
+
+struct FShadowKey
+{
+	uint64 LightID = 0;
+	uint64 MapIndex = 0;
+
+	bool operator==(const FShadowKey& Other) const
+	{
+		return LightID == Other.LightID && MapIndex == Other.MapIndex;
+	}
+};
+
+struct FShadowKeyHash
+{
+	size_t operator()(const FShadowKey& Key) const
+	{
+		const size_t A = std::hash<uint64>{}(Key.LightID);
+		const size_t B = std::hash<uint64>{}(Key.MapIndex);
+
+		return A ^ (B + static_cast<size_t>(0x9e3779b9) + (A << 6) + (A >> 2));
+	}
+};
+
+struct FShadowCacheEntry
+{
+	FShadowAtlasAllocation Allocation{};
+
+	uint64 RenderedRevision = 0;
+	bool bHasRenderedContent = false;
+};
+
+struct FShadowFrameEntry
+{
+	FShadowKey Key{};
+	uint64 RequestedRevision = 0;
+};
+
 class FShadowRenderer
 {
 public:
 	bool Init(FRenderer* InRenderer);
 
 	void SetParameters(
+		uint64 SceneID,
 		TArray<FLightShadowData>&& Lights,
 		uint32 LightSlotCount);
 	void BeginShadowPass();
@@ -78,6 +121,8 @@ public:
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
 	//const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
+	const TArray<uint32>& GetDirtyShadowIndices() const { return DirtyShadowIndices; }
+
 private:
 	FRenderer* Renderer = nullptr;
 	FShadowRenderStats CurrentViewStats{};
@@ -95,8 +140,21 @@ private:
 
 	TArray<FLightShadowRange> LightShadowRanges{};		
 	TArray<FShadowInfo> ShadowInfos{};
-	TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
+	//TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
 
+	/* Cache */
+	// 프레임간 유지
+	TMap<FShadowKey, FShadowCacheEntry, FShadowKeyHash> ShadowCache;
+
+	// SetParameters 마다 재구성: ShadowInfos와 같은 index
+	TArray<FShadowFrameEntry> ShadowFrameEntries;
+
+	// 이번에 그려야 하는 ShadowInfo index
+	TArray<uint32> DirtyShadowIndices;
+
+	uint64 CachedSceneID = 0;
+
+	/* */
 	const float HalfDirectionalLightSourceAngularDiameterRad = 0.0046748644f;
 	const float DirectionalLightSourceTangentTheta = tan(HalfDirectionalLightSourceAngularDiameterRad);
 };
