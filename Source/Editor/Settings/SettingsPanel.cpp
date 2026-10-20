@@ -52,6 +52,8 @@ void FSettingsPanel::OnRender()
 	ImGui::Combo("Lighting Model", &Settings.LightingModel, Models, IM_ARRAYSIZE(Models));
 	ImGui::Combo("Shadow Resolution", &Settings.ShadowResolutionQuality, "Low (512)\0Medium (1024)\0High (2048)\0Ultra (4096)\0");
 	ImGui::SliderInt("Cascades", &Settings.NumCascades, 1, 4);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Ortho. views always use 1 cascade.");
 	ImGui::SliderFloat("Shadow Distance", &Settings.ShadowDistance, 5.0f, 500.0f, "%.0f");
 	ImGui::SliderFloat("Cascade Split", &Settings.CascadeSplitLambda, 0.0f, 1.0f, "%.2f");
 	ImGui::SliderFloat("Cascade Blend", &Settings.CascadeBlendWidth, 0.0f, 0.3f, "%.2f");

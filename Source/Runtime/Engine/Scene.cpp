@@ -240,9 +240,39 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			FVector Near[4], Far[4];
 			GetFrustumPlaneCorners(CameraViewProj, Near, Far);
 			
-			const uint32 Count = FMath::Clamp(Shadow.NumCascades, 1u, MaxCascades);
+			const uint32 Count = (bOrtho)? 1u : FMath::Clamp(Shadow.NumCascades, 1u, MaxCascades);
 			float Splits[MaxCascades + 1];
-			ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
+
+			// Ortho 이면 Cascade 하나 만들고 Near, Far 조정
+			if (bOrtho)
+			{
+				// 물체가 존재하는 곳 (씬 Bounds)의 최소 깊이, 최대 깊이 가져오기
+				float MinZ = 1.0f, MaxZ = 0.0f;
+				for (int32 c = 0; c < 8; ++c)
+				{
+					// 첫번째, 두번째, 세번째 비트 검사
+					const FVector P((c & 1) ? Bounds.Max.X : Bounds.Min.X,
+									(c & 2) ? Bounds.Max.Y : Bounds.Min.Y,
+									(c & 4) ? Bounds.Max.Z : Bounds.Min.Z);
+					
+					const FVector4 Clip = CameraViewProj.TransformFVector4(FVector4(P.X, P.Y, P.Z, 1.0f));
+
+					// MinZ, MaxZ 갱신
+					MinZ = FMath::Min(MinZ, Clip.Z);
+					MaxZ = FMath::Max(MaxZ, Clip.Z);
+				}
+				// 카메라 
+				MinZ = FMath::Clamp(MinZ, 0.0f, 1.0f);
+				MaxZ = FMath::Clamp(MaxZ, 0.0f, 1.0f);
+				
+				// Splits[0] ~ splits[1] 구간의 Cascade 하나
+				Splits[0] = CamNear + MinZ * (CamFar - CamNear);
+				Splits[1] = CamNear + MaxZ * (CamFar - CamNear);
+			}
+			else
+			{
+				ComputeCascadeSplits(CamNear, SliceFar, Count, Shadow.SplitLambda, Splits);
+			}
 			
 			FLightShadowData Directional{};
 			Directional.LightID = Proxy->GetLightComponent()->GetUUID();
