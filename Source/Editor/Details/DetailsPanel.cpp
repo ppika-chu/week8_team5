@@ -356,12 +356,13 @@ namespace
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", Texture->GetPath().c_str());
 			}
-		} else {
+		}
+		else {
 			ImGui::Button("Empty", { ThumbnailSize, ThumbnailSize });
 		}
 
 		if (ImGui::BeginDragDropTarget()) {
-			if (const ImGuiPayload* Payload{ ImGui::AcceptDragDropPayload(EditorDragDrop::Texture) }) {
+			if (const ImGuiPayload * Payload{ ImGui::AcceptDragDropPayload(EditorDragDrop::Texture) }) {
 				UTexture2D* DroppedTexture{ *static_cast<UTexture2D**>(Payload->Data) };
 				if (SetMaterialTexture(MeshComponent, MaterialSlot, TextureSlot, DroppedTexture, Effective, Override)) {
 					Texture = DroppedTexture;
@@ -488,14 +489,14 @@ namespace
 					}
 
 					ImGui::TableNextRow();
-					
+
 					ImGui::TableSetColumnIndex(0);
 					ImGui::Text("Shininess");
-					
+
 					ImGui::TableSetColumnIndex(1);
 					ImGui::SetNextItemWidth(-1.0f);
-					
-					float TempShininess =Effective ? Effective->Shininess : 32.0f;
+
+					float TempShininess = Effective ? Effective->Shininess : 32.0f;
 					if (ImGui::DragFloat("##Shininess", &TempShininess, 0.5f, 1.0f, 256.0f))
 					{
 						Override = EnsureMaterialOverride(MeshComponent, Slot, Effective, Override);
@@ -507,7 +508,7 @@ namespace
 					}
 
 					ImGui::TableNextRow();
-					
+
 					// 4: UV Scroll Speed
 					ImGui::TableSetColumnIndex(0);
 					ImGui::Text("UV Scroll");
@@ -881,7 +882,7 @@ void FDetailsPanel::OnRender()
 		UActorComponent* SelectCandidateComponent = TargetComponent;
 
 		DrawActorHeader(TargetActor, TargetComponent);
-		DrawCompoenetList(TargetActor, TargetComponent);				
+		DrawCompoenetList(TargetActor, TargetComponent);
 		ImGui::Separator();
 
 		// 액터 -> 컴포넌트 순으로, 클래스별 프로퍼티 표시
@@ -895,7 +896,7 @@ void FDetailsPanel::OnRender()
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
 
-			if(SelectCandidateComponent != TargetComponent)
+			if (SelectCandidateComponent != TargetComponent)
 			{
 				SelectComponent(TargetComponent);
 			}
@@ -913,9 +914,50 @@ void FDetailsPanel::OnRender()
 				}
 
 				PendingDeleteComponent = nullptr;
-			}			
-		}		
-	}	
+			}
+
+			// Show shadow maps
+			if (auto* LightComponent = Cast<ULightComponent>(TargetComponent))
+			{
+				if (!ShadowRenderer)
+				{
+					assert(false);
+					ImGui::TextDisabled("ShadowRenderer is not available.");
+				}
+				else
+				{
+					if (LightComponent->IsCastingShadows())
+					{
+						auto* AtlasTexture = ShadowRenderer->GetShadowMap();
+						auto ShadowInfos = ShadowRenderer->GetShadowInfosByLightUUID(LightComponent->GetUUID());
+
+						ImGui::SeparatorText("Shadow Maps");
+						for (int i = 0; i < ShadowInfos.Num(); ++i)
+						{
+							if (AtlasTexture && AtlasTexture->GetSRV())
+							{
+								FVector2 AtlasOffset = ShadowInfos[i].AtlasOffset;
+								FVector2 AtlasScale = ShadowInfos[i].AtlasScale;
+								const ImVec2 uv0(AtlasOffset.X, AtlasOffset.Y);
+								const ImVec2 uv1(AtlasOffset.X + AtlasScale.X, AtlasOffset.Y + AtlasScale.Y);
+
+								ImGui::Text("Shadow Map %d", i);
+								ImGui::Image(
+									(ImTextureID)AtlasTexture->GetSRV(),
+									ImVec2(256, 256),
+									uv0,
+									uv1);
+							}
+						}
+					}
+					else
+					{
+						ImGui::TextDisabled("Shadows are disabled for this light.");
+					}
+				}
+			}
+		}
+	}
 	ImGui::End();
 }
 
@@ -974,7 +1016,7 @@ void FDetailsPanel::DrawCompoenetList(AActor* SelectedActor, UActorComponent*& O
 		{
 			Flags |= ImGuiTreeNodeFlags_Selected;
 		}
-		
+
 		FString Label = ActorComp->GetName();
 		const ImVec2 RowStart = ImGui::GetCursorScreenPos();
 		const float RowWidth = ImGui::GetContentRegionAvail().x;
@@ -995,7 +1037,7 @@ void FDetailsPanel::DrawCompoenetList(AActor* SelectedActor, UActorComponent*& O
 
 		const FString ClassName = std::format("({})", ActorComp->GetClass()->Name);
 		const float TextX = RowStart.x + RowWidth - ImGui::CalcTextSize(ClassName.c_str()).x;
-		ImGui::GetWindowDrawList()->AddText(ImVec2(TextX, RowStart.y), IM_COL32(200, 200, 200, 255), ClassName.c_str());		
+		ImGui::GetWindowDrawList()->AddText(ImVec2(TextX, RowStart.y), IM_COL32(200, 200, 200, 255), ClassName.c_str());
 
 		ImGui::PopID();
 	}
@@ -1130,7 +1172,7 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 
 void FDetailsPanel::TryReparent(USceneComponent* DroppedComponent, USceneComponent* DragComponent)
 {
-	if (DroppedComponent != nullptr 
+	if (DroppedComponent != nullptr
 		&& DroppedComponent->GetAttachParent() != DragComponent
 		&& DroppedComponent != DragComponent)
 	{
