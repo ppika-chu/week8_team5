@@ -973,7 +973,8 @@ void UEditorEngine::RenderShadowPass()
 	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
 
 	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
-	if (ShadowInfos.Num() == 0)
+	const TArray<uint32>& ShadowDirtyIndices = ShadowRenderer->GetDirtyShadowIndices();
+	if (ShadowDirtyIndices.Num() == 0)
 	{
 		return;
 	}
@@ -981,11 +982,13 @@ void UEditorEngine::RenderShadowPass()
 	ShadowRenderer->BeginShadowPass();
 
 	//for (const FShadowInfo& ShadowInfo : ShadowInfos)
-	for (uint32 i = 0; i < static_cast<uint32>(ShadowInfos.Num()); ++i)
+	//for (uint32 i = 0; i < static_cast<uint32>(ShadowInfos.Num()); ++i)
+	for (uint32 DirtyIndex : ShadowDirtyIndices)
 	{
 		MultipleViewportsAdapter.BuildShadowQueue(
-			ShadowInfos[i].LightViewProj, ShadowQueue);
-		ShadowRenderer->OnRender(ShadowQueue, i);
+			ShadowInfos[DirtyIndex].LightViewProj, ShadowQueue);
+
+		ShadowRenderer->OnRender(ShadowQueue, DirtyIndex);
 	}
 	ShadowRenderer->EndShadowPass();
 }

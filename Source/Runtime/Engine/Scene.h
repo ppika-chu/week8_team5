@@ -51,7 +51,7 @@ public:
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
 
-	const FDirectionalLightSceneProxy* GetMainDirectionalLight() const;
+	FDirectionalLightSceneProxy* GetMainDirectionalLight();
 	const FBox& GetBounds() const { return BVH.GetRootBounds(); }
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
