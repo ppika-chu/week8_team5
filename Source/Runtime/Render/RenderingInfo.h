@@ -41,6 +41,7 @@ struct FRenderingDesc
 	ERenderTargetLoadOp  LoadOp = ERenderTargetLoadOp::Clear;
 	ERenderTargetStoreOp StoreOp = ERenderTargetStoreOp::Store;
 	FClearValue ClearValue = FClearValue();
+	uint32 ArrayIndex = 0; // For Texture2DArray or TextureCube
 };
 
 struct FRenderingInfo

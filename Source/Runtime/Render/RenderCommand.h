@@ -93,7 +93,7 @@ public:
 	static void BeginRenderPass(const FRenderingInfo& RenderingInfo);
 	static void EndRenderPass(const FRenderingInfo& RenderingInfo);
 	static void ClearDepthStencil(FTexture2D* DepthStencilTexture, float Depth = 1.0f, uint8 Stencil = 0);
-	static bool ClearDepthRegion(FTexture2D* DepthTexture, uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth = 1.0f);
+	static bool ClearDepthRegion(FTexture2D* DepthTexture, uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth = 1.0f, uint32 ArrayIndex = 0);
 
 	static void SetViewport(uint32 InX, uint32 InY, uint32 InWidth, uint32 InHeight);
 

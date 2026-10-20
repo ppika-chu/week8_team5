@@ -247,13 +247,33 @@ void RenderCommand::BeginRenderPass(const FRenderingInfo& RenderingInfo)
 	ID3D11DepthStencilView* DSV = nullptr;
 	if (RenderingInfo.DepthStencil.Texture != nullptr)
 	{
+		const FRenderingDesc& DepthDesc = RenderingInfo.DepthStencil;
+
 		FClearValue dsvClearValue = RenderingInfo.DepthStencil.ClearValue;
-		DSV = RenderingInfo.DepthStencil.Texture->GetDSV();
-		if (RenderingInfo.DepthStencil.LoadOp == ERenderTargetLoadOp::Clear)
+		DSV = RenderingInfo.DepthStencil.Texture->GetSliceDSV(DepthDesc.ArrayIndex);
+		assert(DSV);
+
+		if (DSV && RenderingInfo.DepthStencil.LoadOp == ERenderTargetLoadOp::Clear)
 		{
-			RenderDevice->GetContext()->ClearDepthStencilView(RenderingInfo.DepthStencil.Texture->GetDSV(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, dsvClearValue.DepthClearValue, dsvClearValue.StencilClearValue);
+			D3D11_DEPTH_STENCIL_VIEW_DESC ViewDesc{};
+			DSV->GetDesc(&ViewDesc);
+
+			UINT ClearFlags = D3D11_CLEAR_DEPTH;
+
+			if (ViewDesc.Format == DXGI_FORMAT_D24_UNORM_S8_UINT ||
+				ViewDesc.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT)
+			{
+				ClearFlags |= D3D11_CLEAR_STENCIL;
+			}
+
+			RenderDevice->GetContext()->ClearDepthStencilView(
+				DSV, 
+				ClearFlags, 
+				dsvClearValue.DepthClearValue, 
+				dsvClearValue.StencilClearValue);
 		}
 	}
+
 	RenderDevice->GetContext()->OMSetRenderTargets((uint32)RTVs.Num(), RTVs.GetData(), DSV);
 
 
@@ -279,11 +299,11 @@ void RenderCommand::ClearDepthStencil(FTexture2D* DepthStencilTexture, float Dep
 }
 
 bool RenderCommand::ClearDepthRegion(FTexture2D* DepthTexture,
-	uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth)
+	uint32 X, uint32 Y, uint32 Width, uint32 Height, float Depth, uint32 ArrayIndex)
 {
 	ID3D11DeviceContext1* Context = RenderDevice->GetClearViewContext();
 
-	if (!Context || !DepthTexture || !DepthTexture->GetDSV())
+	if (!Context || !DepthTexture)
 	{
 		return false;
 	}
@@ -293,14 +313,31 @@ bool RenderCommand::ClearDepthRegion(FTexture2D* DepthTexture,
 		return false;
 	}
 
-	if (X >= DepthTexture->GetWidth() ||
-		Y >= DepthTexture->GetHeight())
+	ID3D11DepthStencilView* DSV =
+		DepthTexture->GetSliceDSV(ArrayIndex);
+
+	if (!DSV || Width == 0 || Height == 0)
+	{
+		return false;
+	}
+
+	const uint32 TextureWidth = DepthTexture->GetWidth();
+	const uint32 TextureHeight = DepthTexture->GetHeight();
+
+	if (X >= TextureWidth ||
+		Y >= TextureHeight)
+	{
+		return false;
+	}
+
+	if (Width > TextureWidth - X ||
+		Height > TextureHeight - Y)
 	{
 		return false;
 	}
 
 	D3D11_DEPTH_STENCIL_VIEW_DESC Desc{};
-	DepthTexture->GetDSV()->GetDesc(&Desc);
+	DSV->GetDesc(&Desc);
 
 	if (Desc.Format != DXGI_FORMAT_D32_FLOAT)
 	{
@@ -319,7 +356,7 @@ bool RenderCommand::ClearDepthRegion(FTexture2D* DepthTexture,
 	};
 
 	Context->ClearView(
-		DepthTexture->GetDSV(),
+		DSV,
 		ClearValue,
 		&Rect,
 		1);

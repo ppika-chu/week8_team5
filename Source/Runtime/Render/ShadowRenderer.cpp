@@ -11,8 +11,9 @@
 constexpr uint32 MaxShadowInfos = 64;
 
 constexpr uint32 MinShadowAtlasSize = 1024;
-constexpr uint32 MaxShadowAtlasSize = 16384;
+constexpr uint32 MaxShadowAtlasSize = 8192;
 
+constexpr uint32 MaxShadowAtlasLayers = 16;
 
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
@@ -224,30 +225,49 @@ void FShadowRenderer::SetParameters(
 		// 3. Try to pack the shadow maps into the atlas
 		TArray<FShadowAtlasAllocation> PackedAllocations;
 
+		uint32 RequiredLayers = 0;
 		uint32 CandidateSize = FMath::Max(
 			ShadowAtlas.GetSize(),
 			MinShadowAtlasSize);
 
+		bool bPacked = false;
 		bReady = false;
 
+		// Try packing with increasing atlas sizes until successful or reaching the maximum size
 		while (CandidateSize <= MaxShadowAtlasSize)
 		{
-			if (FShadowAtlas::TryPack(
+			bPacked = FShadowAtlas::TryPack(
 				Resolutions,
 				CandidateSize,
-				&PackedAllocations))
-			{
-				bReady = ShadowAtlas.EnsureTextureSize(CandidateSize);
-				break;
-			}
+				1,
+				&PackedAllocations,
+				&RequiredLayers);
 
-			// Prevent overflow and unnecessary iterations
-			if (CandidateSize > MaxShadowAtlasSize / 2)
+			if (bPacked || CandidateSize == MaxShadowAtlasSize)
 			{
 				break;
 			}
 
-			CandidateSize *= 2;
+			CandidateSize =
+				CandidateSize > MaxShadowAtlasSize / 2
+				? MaxShadowAtlasSize
+				: CandidateSize * 2;
+		}
+
+		// Increase the number of layers if packing failed with a single layer
+		if (!bPacked && CandidateSize == MaxShadowAtlasSize)
+		{
+			bPacked = FShadowAtlas::TryPack(
+				Resolutions,
+				CandidateSize,
+				MaxShadowAtlasLayers,
+				&PackedAllocations,
+				&RequiredLayers);
+		}
+
+		if (bPacked)
+		{
+			bReady = ShadowAtlas.EnsureTextureSize(CandidateSize, RequiredLayers);
 		}
 
 		// Replace the cache with new allocations if packing was successful
@@ -463,19 +483,40 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	// Invalidate cached content before attempting to update the tile.
 	Cache->bHasRenderedContent = false;
 
+	FTexture2D* AtlasTexture = ShadowAtlas.GetTexture();
+
+	if (!AtlasTexture ||
+		!AtlasTexture->GetSliceDSV(Tile.ArrayIndex))
+	{
+		return;
+	}
+
+	FRenderingInfo Pass{
+		.ViewportSetting = {
+			.StartX = static_cast<int32>(Tile.X),
+			.StartY = static_cast<int32>(Tile.Y),
+			.Width = Tile.Width,
+			.Height = Tile.Height
+		},
+		.DepthStencil = {
+			.Texture = AtlasTexture,
+			.LoadOp = ERenderTargetLoadOp::Load,
+			.ArrayIndex = Tile.ArrayIndex,
+		},
+	};
+
+	RenderCommand::BeginRenderPass(Pass);
+
 	// Clear the depth region for the current shadow tile
 	if (!RenderCommand::ClearDepthRegion(
-		ShadowAtlas.GetTexture(),
+		AtlasTexture,
 		Tile.X, Tile.Y,
-		Tile.Width, Tile.Height))
+		Tile.Width, Tile.Height,
+		1.0f, Tile.ArrayIndex))
 	{
 		// Keep the cache invalid and leave the revision unchanged on failure.
 		return;
 	}
-
-	RenderCommand::SetViewport(
-		Tile.X, Tile.Y, Tile.Width, Tile.Height
-	);
 
 	Renderer->RenderQueueSorting(
 		ShadowQueue,

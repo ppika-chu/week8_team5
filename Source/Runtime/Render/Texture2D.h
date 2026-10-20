@@ -17,8 +17,13 @@ public:
 	FTexture2D(ID3D11Device* Device, ComPtr<ID3D11Resource> SwapchainTexture, const D3D11_TEXTURE2D_DESC& InDesc);
 	~FTexture2D() = default;
 
+	ID3D11DepthStencilView* GetSliceDSV(uint32 ArrayIndex) const;
+
 private:
 	void CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc);
+
+private:
+	TArray<ComPtr<ID3D11DepthStencilView>> SliceDSVs; // Texture2DArray, TextureCube용
 };
 
 class UTexture2D : public URenderAsset

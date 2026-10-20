@@ -5,22 +5,24 @@
 bool FShadowAtlas::TryPack(
 	const TArray<uint32>& Resolutions,
 	uint32 CandidateSize,
-	TArray<FShadowAtlasAllocation>* OutAllocations)
+	uint32 MaxLayers,
+	TArray<FShadowAtlasAllocation>* OutAllocations,
+	uint32* OutRequiredLayers)
 {
-	assert(OutAllocations);
+	assert(OutAllocations || OutRequiredLayers);
 
 	OutAllocations->Reset();
+	*OutRequiredLayers = 0;
 
-	if (CandidateSize == 0)
+	if (CandidateSize == 0 || MaxLayers == 0)
 	{
 		return false;
 	}
 
-	TArray<FShelf> Shelves;
+	//TArray<FShelf> Shelves;
+	TArray<FLayerPackingState> Layers;
 	TArray<FShadowAtlasAllocation> Allocations;
 	Allocations.Reset(Resolutions.Num());
-
-	uint32 UsedHeight = 0;
 
 	for (uint32 Resolution : Resolutions)
 	{
@@ -29,79 +31,137 @@ bool FShadowAtlas::TryPack(
 			return false;
 		}
 
+		FShadowAtlasAllocation ALlocation{};
 		bool bPlaced = false;
 
-		// First-fit shelf packing
-		// Select the first shelf that can fit the tile
-		for (FShelf& Shelf : Shelves)
+		// Use the remaining space in existing layers first
+		for (uint32 LayerIndex = 0;
+			LayerIndex < Layers.Num();
+			++LayerIndex)
 		{
-			if (Resolution > Shelf.Height ||
-				Resolution > CandidateSize - Shelf.NextX)
+			if (TryPlaceInLayer(
+				CandidateSize,
+				Layers[LayerIndex],
+				Resolution,
+				LayerIndex,
+				&ALlocation))
 			{
-				continue;
+				bPlaced = true;
+				break;
+			}
+		}
+
+		// If it doesn't fit in any existing layer, create a new layer
+		if (!bPlaced)
+		{
+			if (Layers.Num() >= MaxLayers)
+			{
+				return false;
 			}
 
-			Allocations.Add(FShadowAtlasAllocation{
-				.X = Shelf.NextX,
-				.Y = Shelf.Y,
-				.Width = Resolution,
-				.Height = Resolution
-				});
+			const uint32 NewLayerIndex = Layers.Num();
+			Layers.Add(FLayerPackingState{});
 
-			Shelf.NextX += Resolution;
-			bPlaced = true;
-			break;
+			if (!TryPlaceInLayer(
+				CandidateSize,
+				Layers[NewLayerIndex],
+				Resolution,
+				NewLayerIndex,
+				&ALlocation))
+			{
+				return false;
+			}
 		}
 
-		if (bPlaced)
-		{
-			continue;
-		}
-
-		// Create a new shelf if no existing shelf can fit the tile
-		if (Resolution > CandidateSize - UsedHeight)
-		{
-			// No more space in the atlas
-			return false;
-		}
-
-		Shelves.Add(FShelf{
-			.Y = UsedHeight,
-			.Height = Resolution,
-			.NextX = Resolution
-			});
-
-		Allocations.Add(FShadowAtlasAllocation{
-			.X = 0,
-			.Y = UsedHeight,
-			.Width = Resolution,
-			.Height = Resolution
-			});
-
-		UsedHeight += Resolution;
+		Allocations.Add(ALlocation);
 	}
 
+	*OutRequiredLayers = Layers.Num();
 	*OutAllocations = std::move(Allocations);
 	return true;
 }
 
-bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
+bool FShadowAtlas::TryPlaceInLayer(
+	uint32 CandidateSize,
+	FLayerPackingState& Layer,
+	uint32 Resolution,
+	uint32 ArrayIndex,
+	FShadowAtlasAllocation* OutAllocation)
 {
-	if (RequiredSize == 0)
+	assert(OutAllocation);
+
+	// First-fit shelf packing
+	// Select the first shelf that can fit the tile
+	for (FShelf& Shelf : Layer.Shelves)
+	{
+		if (Resolution > Shelf.Height ||
+			Resolution > CandidateSize - Shelf.NextX)
+		{
+			continue;
+		}
+
+		*OutAllocation = FShadowAtlasAllocation{
+			.X = Shelf.NextX,
+			.Y = Shelf.Y,
+			.Width = Resolution,
+			.Height = Resolution,
+			.ArrayIndex = ArrayIndex,
+		};
+
+		Shelf.NextX += Resolution;
+		return true;
+	}
+
+	// Create a new shelf if no existing shelf can fit the tile
+	if (Resolution > CandidateSize - Layer.UsedHeight)
+	{
+		// No more space in this layer
+		return false;
+	}
+
+	const uint32 Y = Layer.UsedHeight;
+
+	Layer.Shelves.Add(FShelf{
+		.Y = Y,
+		.Height = Resolution,
+		.NextX = Resolution
+		});
+	Layer.UsedHeight += Resolution;
+
+	*OutAllocation = FShadowAtlasAllocation{
+		.X = 0,
+		.Y = Y,
+		.Width = Resolution,
+		.Height = Resolution,
+		.ArrayIndex = ArrayIndex,
+	};
+
+	return true;
+}
+
+bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize, uint32 RequiredLayers)
+{
+	if (RequiredSize == 0 || RequiredLayers == 0)
 	{
 		return false;
 	}
 
-	if (Texture && AtlasSize >= RequiredSize)
+	if (Texture && AtlasSize >= RequiredSize &&
+		LayerCount >= RequiredLayers)
 	{
 		return true;
 	}
 
+	// Do not decrease the allocated space
+	const uint32 NewSize = FMath::Max(AtlasSize, RequiredSize);
+	const uint32 NewLayerCount = FMath::Max(
+		LayerCount, RequiredLayers);
+
 	D3D11_TEXTURE2D_DESC Desc{
-		.Width = RequiredSize,
-		.Height = RequiredSize,
+		.Width = NewSize,
+		.Height = NewSize,
 		.MipLevels = 1,
-		.ArraySize = 1,
+		.ArraySize = NewLayerCount,
 		.Format = DXGI_FORMAT_R32_TYPELESS,
 		.SampleDesc = { 1, 0 },
 		.Usage = D3D11_USAGE_DEFAULT,
@@ -112,10 +172,24 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
 	auto NewTexture = RenderCommand::CreateTexture2D(Desc, nullptr, true);
 	assert(NewTexture->GetDimension() == ETextureDimension::Texture2DArray);
 
-	if (!NewTexture || !NewTexture->GetDSV() || !NewTexture->GetSRV())
+	if (!NewTexture || !NewTexture->GetRawPtr() || !NewTexture->GetSRV())
 	{
 		return false;
 	}
+
+	for (uint32 LayerIndex = 0;
+		LayerIndex < NewLayerCount;
+		++LayerIndex)
+	{
+		if (!NewTexture->GetSliceDSV(LayerIndex))
+		{
+			return false;
+		}
+	}
+
+	assert(
+		NewTexture->GetDimension() ==
+		ETextureDimension::Texture2DArray);
 
 	if (Texture)
 	{
@@ -125,6 +199,10 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
 	}
 
 	Texture = std::move(NewTexture);
-	AtlasSize = RequiredSize;
+	AtlasSize = NewSize;
+	LayerCount = NewLayerCount;
+
+	HTR_LOG(Info, "[ShadowAtlas] Created new texture: Size={}, Layers={}", NewSize, NewLayerCount);
+
 	return true;
 }

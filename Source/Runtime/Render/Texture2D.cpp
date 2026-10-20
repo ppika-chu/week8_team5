@@ -71,6 +71,18 @@ FTexture2D::FTexture2D(ID3D11Device* Device, ComPtr<ID3D11Resource> SwapchainTex
 	CreateViews(Device, InDesc);
 }
 
+ID3D11DepthStencilView* FTexture2D::GetSliceDSV(uint32 ArrayIndex) const
+{
+	if (Dimension != ETextureDimension::Texture2DArray)
+	{
+		return ArrayIndex == 0 ? DSV.Get() : nullptr;
+	}
+
+	return SliceDSVs.IsValidIndex(ArrayIndex)
+		? SliceDSVs[ArrayIndex].Get()
+		: nullptr;
+}
+
 void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc)
 {
 	HRESULT hr;
@@ -135,25 +147,56 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 	{
 		if (bArrayView)
 		{
-			DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
-			DsvDesc.Texture2DArray = {
-				.MipSlice = 0,
-				.FirstArraySlice = 0,
-				.ArraySize = InDesc.ArraySize
-			};
+			SliceDSVs.Reset();
+			DSV.Reset();
+
+			for (uint32 ArrayIndex = 0;
+				ArrayIndex < InDesc.ArraySize;
+				++ArrayIndex)
+			{
+				DsvDesc.ViewDimension =
+					D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+
+				DsvDesc.Texture2DArray = {
+					.MipSlice = 0,
+					.FirstArraySlice = ArrayIndex,
+					.ArraySize = 1
+				};
+
+				ComPtr<ID3D11DepthStencilView> SliceDSV;
+
+				hr = Device->CreateDepthStencilView(
+					Texture.Get(),
+					&DsvDesc,
+					SliceDSV.GetAddressOf());
+
+				if (FAILED(hr))
+				{
+					HTR_LOG(Error, "[Texture2D] CreateDepthStencilView for slice {} failed (hr=0x{:08X})", ArrayIndex, (uint32)hr);
+					SliceDSVs.Reset();
+					return;
+				}
+
+				SliceDSVs.Add(std::move(SliceDSV));
+			}
+
+			if (SliceDSVs.Num() > 0)
+			{
+				DSV = SliceDSVs[0];
+			}
 		}
 		else
 		{
 			DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-		
+
+			const D3D11_DEPTH_STENCIL_VIEW_DESC* ViewDesc =
+				bTypelessDepth ? &DsvDesc : nullptr;
+
+			hr = Device->CreateDepthStencilView(Texture.Get(), ViewDesc, DSV.GetAddressOf());
+			if (FAILED(hr))
+				HTR_LOG(Error, "[Texture2D] CreateDepthStencilView failed (hr=0x{:08X})", (uint32)hr);
 		}
 
-		const D3D11_DEPTH_STENCIL_VIEW_DESC* ViewDesc =
-			(bTypelessDepth || bArrayView) ? &DsvDesc : nullptr;
-
-		hr = Device->CreateDepthStencilView(Texture.Get(), ViewDesc, DSV.GetAddressOf());
-		if (FAILED(hr))
-			HTR_LOG(Error, "[Texture2D] CreateDepthStencilView failed (hr=0x{:08X})", (uint32)hr);
 	}
 }
 
