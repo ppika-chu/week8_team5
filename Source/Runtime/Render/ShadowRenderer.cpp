@@ -4,6 +4,7 @@
 #include "Renderer.h"
 #include "RenderCommand.h"
 #include "RenderingInfo.h"
+#include "Core/Windows/WindowsPlatformTime.h"
 
 constexpr uint32 MaxShadowInfos = 64;
 
@@ -52,6 +53,12 @@ void FShadowRenderer::SetParameters(
 	TArray<FLightShadowData>&& Lights,
 	uint32 LightSlotCount)
 {
+	CurrentViewStats = {};
+	for (const FLightShadowData& Light : Lights)
+	{
+		CurrentViewStats.RequestedMapCount += static_cast<uint32>(Light.Maps.Num());
+	}
+
 	ShadowInfos.Reset(MaxShadowInfos);
 	ShadowAllocations.Reset(MaxShadowInfos);
 
@@ -232,6 +239,14 @@ void FShadowRenderer::SetParameters(
 		}
 	}
 
+	CurrentViewStats.AllocatedMapCount = static_cast<uint32>(ShadowInfos.Num());
+	CurrentViewStats.AtlasSize = ShadowAtlas.GetSize();
+	for (const FShadowAtlasAllocation& Allocation : ShadowAllocations)
+	{
+		CurrentViewStats.AllocatedTexelCount +=
+			static_cast<uint64>(Allocation.Width) * Allocation.Height;
+	}
+
 	// If packing failed, ShadowInfos is empty, and Range.Count remains 0 for all lights.
 	if (ShadowInfos.Num() > 0)
 	{
@@ -265,6 +280,8 @@ void FShadowRenderer::BindForLighting() const
 
 void FShadowRenderer::BeginShadowPass()
 {
+	ShadowPassStartCycles = FPlatformTime::GetCycles64();
+
 	constexpr auto Stages =
 		EShaderBindFlagBits::Vertex |
 		EShaderBindFlagBits::Pixel;
@@ -304,8 +321,11 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 		ShadowQueue,
 		ShadowInfo.LightViewProj);
 
+	const uint64 DrawCallsBefore = RenderCommand::GetDrawIndexedCallCount();
 	Renderer->RenderPreparedDepth(
 		ShadowInfo.LightViewProj, true);
+	CurrentViewStats.DrawCallCount += RenderCommand::GetDrawIndexedCallCount() - DrawCallsBefore;
+	++CurrentViewStats.UpdatedMapCount;
 }
 
 void FShadowRenderer::EndShadowPass()
@@ -320,4 +340,7 @@ void FShadowRenderer::EndShadowPass()
 
 	RenderCommand::SetRasterizerState(
 		ERasterizerState::SolidBack);
+
+	const uint64 ElapsedCycles = FPlatformTime::GetCycles64() - ShadowPassStartCycles;
+	CurrentViewStats.CpuTimeMs = FPlatformTime::ToMilliseconds64(ElapsedCycles);
 }

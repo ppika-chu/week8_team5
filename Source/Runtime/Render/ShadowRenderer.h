@@ -3,6 +3,7 @@
 #include "Texture2D.h"
 #include "RenderPacket.h"
 #include "ShadowAtlas.h"
+#include "Core/Stats/ShadowStats.h"
 
 class FRenderer;
 
@@ -71,6 +72,7 @@ public:
 	void BindForLighting() const;
 
 	const TArray<FShadowInfo>& GetShadowInfos() const { return ShadowInfos; }
+	const FShadowRenderStats& GetCurrentViewStats() const { return CurrentViewStats; }
 	const TArray<FLightShadowRange>& GetLightShadowRanges() const { return LightShadowRanges; }
 
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
@@ -78,6 +80,8 @@ public:
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
 private:
 	FRenderer* Renderer = nullptr;
+	FShadowRenderStats CurrentViewStats{};
+	uint64 ShadowPassStartCycles = 0;
 
 	// Shadow
 	//TUniquePtr<FConstantBuffer> ShadowCB{};

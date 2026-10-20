@@ -133,7 +133,12 @@ void FRenderer::UploadPerObjectConstants()
 		FRenderPacket& P = RenderPackets[Index];
 		const FMatrix& Model = GetPacketWorld(P);
 		const FMatrix WorldToLocal = P.Proxy ? P.Proxy->GetWorldToLocal() : Model.Inverse();
-		WritePerObjectConstants(Dest + static_cast<size_t>(Index) * ObjectSlotBytes, Model, WorldToLocal);
+		const bool bReceiveShadows = P.Proxy ? P.Proxy->IsReceivingShadows() : true;
+		WritePerObjectConstants(
+			Dest + static_cast<size_t>(Index) * ObjectSlotBytes,
+			Model,
+			WorldToLocal,
+			bReceiveShadows);
 		P.Slot = Index;
 	}
 
@@ -184,6 +189,9 @@ void FRenderer::RenderTranslucent(const FMatrix& ViewProjection)
 // 스태틱 메시 묶음을 정렬 키 순서로 그린다. 바인딩은 묶음마다 한 번, 항목마다는 칸 바인딩과 드로우만 한다.
 void FRenderer::DrawStaticGroups()
 {
+	constexpr auto ObjectStages =
+		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel;
+
 	if (StaticGroups.empty())
 		return;
 
@@ -207,12 +215,17 @@ void FRenderer::DrawStaticGroups()
 		{
 			if (bUsePerObjectSlots && Item.Slot != InvalidObjectSlot)
 			{
-				RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), Item.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+				RenderCommand::BindConstantBufferRange(
+					2, PerObjectSlotCB.get(),
+					Item.Slot * PerObjectSlotConstants,
+					PerObjectSlotConstants, ObjectStages);
 			}
 			else
 			{
-				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld());
+				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
+				UpdatePerObjectConstants(
+					Item.Proxy->GetLocalToWorld(),
+					Item.Proxy->IsReceivingShadows());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -290,6 +303,9 @@ void FRenderer::RenderPreparedDepth(const FMatrix& ViewProjection, bool bInclude
 // 정렬된 패킷 중 [Begin, End) 범위를 View 행렬과 Section 범위로 그린다.
 void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection)
 {
+	constexpr auto ObjectStages =
+		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel;
+
 	SCOPE_CYCLE_COUNTER(STAT_DrawRenderPackets);
 
 	LastMesh = nullptr;
@@ -314,11 +330,14 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 			UpdateMaterialParams(RenderPacket);
 		if (bUsePerObjectSlots && RenderPacket.Slot != InvalidObjectSlot)
 		{
-			RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), RenderPacket.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+			RenderCommand::BindConstantBufferRange(
+				2, PerObjectSlotCB.get(),
+				RenderPacket.Slot * PerObjectSlotConstants,
+				PerObjectSlotConstants, ObjectStages);
 		}
 		else
 		{
-			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
 			UpdatePerObjectConstants(RenderPacket, ViewProjection);
 		}
 
@@ -334,6 +353,9 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 
 FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewProjection)
 {
+	constexpr auto ObjectStages =
+		EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel;
+
 	FOcclusionMeasureResult Result;
 
 	// 불투명 드로우를 두 경로(스태틱 묶음, 일반 패킷)에서 한 목록으로 모은다. 그린 순서와 같게 묶음 먼저.
@@ -349,12 +371,14 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		const void* ObjectKey;      // 같은 물체의 섹션을 한 물체로 센다
 		bool bOccludedByGpu;
 		const FRenderPacket* Packet;
+		bool bReceiveShadows;
 	};
 	std::vector<FMeasureDraw> Draws;
 	for (const FStaticDrawGroup* Group : StaticGroups)
 		for (const FStaticDrawItem& Item : Group->Items)
 			Draws.push_back({ Group->Mesh, Group->Material, Group->LODIndex, Item.Slot, Item.StartIndex, Item.IndexCount,
-				&Item.Proxy->GetLocalToWorld(), Item.Proxy, Item.bOccludedByGpu != 0, nullptr });
+				&Item.Proxy->GetLocalToWorld(), Item.Proxy, Item.bOccludedByGpu != 0, nullptr,
+				Item.Proxy->IsReceivingShadows() });
 	for (uint32 k = 0; k < FirstTranslucentIndex; ++k)
 	{
 		const FRenderPacket& Packet = RenderPackets[SortEntries[k].PacketIndex];
@@ -362,7 +386,8 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		// 프록시가 없는 패킷(빌보드 등)은 패킷 자체를 한 물체로 센다.
 		const void* Key = Packet.Proxy ? static_cast<const void*>(Packet.Proxy) : static_cast<const void*>(&Packet);
 		Draws.push_back({ Packet.Mesh, Packet.Material, Packet.LODIndex, Packet.Slot, Packet.StartIndex, IndexCount,
-			&GetPacketWorld(Packet), Key, Packet.bOccludedByGpu, &Packet });
+			&GetPacketWorld(Packet), Key, Packet.bOccludedByGpu, &Packet,
+			Packet.Proxy ? Packet.Proxy->IsReceivingShadows() : true });
 	}
 
 	const uint32 Count = static_cast<uint32>(Draws.size());
@@ -397,7 +422,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 
 	RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 	if (!bUsePerObjectSlots)
-		RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+		RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
 
 	UStaticMesh* BoundMesh = nullptr;
 	UMaterial* BoundMaterial = nullptr;
@@ -422,11 +447,11 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 
 		if (bUsePerObjectSlots && Draw.Slot != InvalidObjectSlot)
 			RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(),
-				Draw.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+				Draw.Slot * PerObjectSlotConstants, PerObjectSlotConstants, ObjectStages);
 		else
 		{
-			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-			UpdatePerObjectConstants(*Draw.World);
+			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
+			UpdatePerObjectConstants(*Draw.World, Draw.bReceiveShadows);
 		}
 
 		ID3D11Query* Query = OcclusionQueries[Index].Get();
@@ -576,15 +601,21 @@ void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, cons
 	// rp.Transform 과 Camera VP 행렬 곱
 	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
 
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket));
+	const bool bReceiveShadows = RenderPacket.Proxy
+		? RenderPacket.Proxy->IsReceivingShadows()
+		: true;
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket), bReceiveShadows);
 }
 
-void FRenderer::UpdatePerObjectConstants(const FMatrix& World)
+void FRenderer::UpdatePerObjectConstants(
+	const FMatrix& World,
+	bool bReceiveShadows)
 {
-	FPerObjectConstants Constants;
+	FPerObjectConstants Constants{};
 
 	Constants.World = World;
 	Constants.NormalMatrix = World.Inverse().GetTransposed();
+	Constants.bReceiveShadows = bReceiveShadows ? 1u : 0u;
 
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }

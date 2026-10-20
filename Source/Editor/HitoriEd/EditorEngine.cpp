@@ -309,6 +309,15 @@ void UEditorEngine::Tick(const float DeltaTime)
 // DeltaTime을 패널에 전달하고 에디터 단축키를 처리한다.
 void UEditorEngine::BeginFrame(const float DeltaTime)
 {
+	static_assert(FMultipleViewportsAdapter::MaxViewCount == MaxShadowStatsViewCount);
+	for (int32 ViewIndex = 0; ViewIndex < MaxShadowStatsViewCount; ++ViewIndex)
+	{
+		ViewShadowStats[ViewIndex] = {};
+		bShadowViewStatsValid[ViewIndex] = false;
+	}
+	++ShadowStatsFrameNumber;
+	ShadowGpuProfiler.BeginFrame(ShadowStatsFrameNumber, FStatOverlay::IsEnabled(EStatFlags::Shadow));
+
 	FStatOverlay::Tick(DeltaTime);
 	EditorControlsPanel->FEditorControlsPanel::DeltaTime = DeltaTime;
 
@@ -442,7 +451,9 @@ void UEditorEngine::RenderMultipleViewports()
 										   MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
 										   MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
 										   ShadowSettings);
+		BeginShadowStatsForView(ViewIndex);
 		RenderShadowPass();
+		RecordShadowViewStats(ViewIndex);
 		{	
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
 			MultipleViewportsAdapter.BuildRenderQueue(ViewIndex, RenderQueue, IconQueue, ArrowQueue);
@@ -477,7 +488,9 @@ void UEditorEngine::RenderMultipleViewports()
 										   MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
 										   MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
 										   ShadowSettings);
+		BeginShadowStatsForView(PIEViewIndex);
 		RenderShadowPass();
+		RecordShadowViewStats(PIEViewIndex);
 		
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
@@ -494,6 +507,9 @@ void UEditorEngine::RenderMultipleViewports()
 			RenderQueue, IconQueue, ArrowQueue);
 		CopyPIEWindowToBackbuffer();
 	}
+
+	ShadowGpuProfiler.EndFrame();
+	ViewportsPanel->SetShadowStats(ViewShadowStats, bShadowViewStatsValid, GetFrameShadowStats(), ShadowGpuProfiler.GetLastCompletedFrame());
 
 	EMultipleViewportsCameraPreset CameraPresets[4]{};
 	for (int32 ViewIndex = 0; ViewIndex < 4; ++ViewIndex)
@@ -916,6 +932,40 @@ void UEditorEngine::RenderDepthPass(const int32 ViewIndex, const FRenderingInfo&
 	RenderCommand::BeginRenderPass(PassInfo);
 	DepthViewRenderer->OnRender(ViewRenderingInfo.DepthStencil.Texture, ViewProjection, ViewCameraLocation, ViewCameraForward);
 	RenderCommand::EndRenderPass(PassInfo);
+}
+
+FShadowFrameStats UEditorEngine::GetFrameShadowStats() const
+{
+	FShadowFrameStats Result{};
+	Result.FrameNumber = ShadowStatsFrameNumber;
+	for (int32 ViewIndex = 0; ViewIndex < MaxShadowStatsViewCount; ++ViewIndex)
+	{
+		if (!bShadowViewStatsValid[ViewIndex])
+			continue;
+		const FShadowRenderStats& Stats = ViewShadowStats[ViewIndex];
+		Result.CpuTimeMs += Stats.CpuTimeMs;
+		Result.RequestedMapCount += Stats.RequestedMapCount;
+		Result.AllocatedMapCount += Stats.AllocatedMapCount;
+		Result.UpdatedMapCount += Stats.UpdatedMapCount;
+		Result.DrawCallCount += Stats.DrawCallCount;
+		++Result.ViewCount;
+	}
+	return Result;
+}
+
+void UEditorEngine::BeginShadowStatsForView(int32 ViewIndex)
+{
+	if (SettingsPanel->GetSettings().bDrawPrimitives && ShadowRenderer->GetShadowInfos().Num() > 0)
+		ShadowGpuProfiler.BeginView(ViewIndex);
+}
+
+void UEditorEngine::RecordShadowViewStats(int32 ViewIndex)
+{
+	ShadowGpuProfiler.EndView(ViewIndex);
+	if (ViewIndex < 0 || ViewIndex >= MaxShadowStatsViewCount)
+		return;
+	ViewShadowStats[ViewIndex] = ShadowRenderer->GetCurrentViewStats();
+	bShadowViewStatsValid[ViewIndex] = true;
 }
 
 void UEditorEngine::RenderShadowPass()
