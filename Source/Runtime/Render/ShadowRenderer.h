@@ -124,6 +124,7 @@ public:
 	const TArray<uint32>& GetDirtyShadowIndices() const { return DirtyShadowIndices; }
 
 	TArray<FShadowAtlasAllocation> GetShadowMapRects(uint32 LightID) const;
+	TArray<FShadowInfo> GetShadowInfosByLightUUID(uint32 LightID) const;
 
 private:
 	FRenderer* Renderer = nullptr;

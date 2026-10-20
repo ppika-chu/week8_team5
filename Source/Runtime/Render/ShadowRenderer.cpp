@@ -490,3 +490,28 @@ TArray<FShadowAtlasAllocation> FShadowRenderer::GetShadowMapRects(uint32 LightID
 	
 	return Result;
 }
+
+TArray<FShadowInfo> FShadowRenderer::GetShadowInfosByLightUUID(uint32 LightID) const
+{
+	TArray<std::pair<uint64, FShadowInfo>> Sorted;
+	for (uint32 i = 0; i < static_cast<uint32>(ShadowFrameEntries.Num()); ++i)
+	{
+		const FShadowFrameEntry& Frame = ShadowFrameEntries[i];
+		if (Frame.Key.LightID == LightID)
+		{
+			Sorted.Add({ Frame.Key.MapIndex, ShadowInfos[i] });
+		}
+	}
+
+	std::sort(Sorted.begin(), Sorted.end(), [](const std::pair<uint64, FShadowInfo>& A, const std::pair<uint64, FShadowInfo>& B) {
+		return A.first < B.first;
+		});
+
+	TArray<FShadowInfo> Result;
+	for (const auto& [Index, Info] : Sorted)
+	{
+		Result.Add(Info);
+	}
+
+	return Result;
+}
