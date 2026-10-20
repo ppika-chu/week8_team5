@@ -60,12 +60,27 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 	HRESULT hr;
 
 	// TYPELESS 깊이 텍스처는 뷰마다 해석할 포맷을 지정해야 한다 (nullptr이면 생성 실패)
-	const bool bTypelessDepth = (InDesc.Format == DXGI_FORMAT_R24G8_TYPELESS);
+	const bool bTypelessDepth = (InDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || InDesc.Format == DXGI_FORMAT_R32_TYPELESS);
+	D3D11_SHADER_RESOURCE_VIEW_DESC SrvDesc{};
+	D3D11_DEPTH_STENCIL_VIEW_DESC DsvDesc{};
+	switch (InDesc.Format)
+	{
+	case DXGI_FORMAT_R32_TYPELESS:
+		SrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		DsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		break;
+	case DXGI_FORMAT_R24G8_TYPELESS:
+		SrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		DsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		break;
+	default:
+		SrvDesc.Format = InDesc.Format;
+		DsvDesc.Format = InDesc.Format;
+		break;
+	}
 
 	if (InDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)
 	{
-		D3D11_SHADER_RESOURCE_VIEW_DESC SrvDesc{};
-		SrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;   // 깊이 24bit만 float로 읽는다
 		SrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 		SrvDesc.Texture2D.MipLevels = 1;
 
@@ -84,8 +99,6 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 
 	if (InDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL)
 	{
-		D3D11_DEPTH_STENCIL_VIEW_DESC DsvDesc{};
-		DsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
 		DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
 
 		hr = Device->CreateDepthStencilView(Texture.Get(), bTypelessDepth ? &DsvDesc : nullptr, DSV.GetAddressOf());

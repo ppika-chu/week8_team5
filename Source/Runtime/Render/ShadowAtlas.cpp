@@ -102,7 +102,7 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize)
 		.Height = RequiredSize,
 		.MipLevels = 1,
 		.ArraySize = 1,
-		.Format = DXGI_FORMAT_R24G8_TYPELESS,
+		.Format = DXGI_FORMAT_R32_TYPELESS,
 		.SampleDesc = { 1, 0 },
 		.Usage = D3D11_USAGE_DEFAULT,
 		.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
