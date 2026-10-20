@@ -105,6 +105,11 @@ class FShadowRenderer
 public:
 	bool Init(FRenderer* InRenderer);
 
+	void SetShadowCacheEnabled(bool bEnabled)
+	{
+		bEnableShadowMapCache = bEnabled;
+	}
+
 	void SetParameters(
 		uint64 SceneID,
 		TArray<FLightShadowData>&& Lights,
@@ -143,6 +148,8 @@ private:
 	//TArray<FShadowAtlasAllocation> ShadowAllocations{}; // Use same index with ShadowInfos
 
 	/* Cache */
+	bool bEnableShadowMapCache = true;
+
 	// 프레임간 유지
 	TMap<FShadowKey, FShadowCacheEntry, FShadowKeyHash> ShadowCache;
 

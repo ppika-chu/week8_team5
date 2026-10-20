@@ -2,6 +2,9 @@
 #include "Editor/OutputLog/OutputLogPanel.h"
 
 #include "Core/StatOverlay.h"
+#include "Render/ShadowRenderer.h"
+
+#include <sstream>
 
 static int TextEditCallbackStub(ImGuiInputTextCallbackData* data)
 {
@@ -166,6 +169,40 @@ void FOutputLogPanel::ExecCommand(const FString& CommandLine)
 	History.Add(CommandLine);
 
 	// Process command
+	std::istringstream CommandStream(CommandLine);
+	FString CommandName;
+	CommandStream >> CommandName;
+
+	if (EqualsIgnoreCase(
+		CommandName, "r.shadow.CacheWholeSceneShadows"))
+	{
+		FString Value;
+		FString ExtraArgument;
+		CommandStream >> Value;
+
+		if ((Value != "0" && Value != "1") ||
+			(CommandStream >> ExtraArgument))
+		{
+			FLog::Log(ELogVerbosity::Warning,
+				"Usage: r.shadow.CacheWholeSceneShadows <0|1>");
+		}
+		else if (!ShadowRenderer)
+		{
+			FLog::Log(ELogVerbosity::Error,
+				"ShadowRenderer is not connected.");
+		}
+		else
+		{
+			ShadowRenderer->SetShadowCacheEnabled(Value == "1");
+
+			FLog::Log(ELogVerbosity::Info,
+				"{} = {}", CommandName, Value);
+		}
+
+		ScrollToBottom = true;
+		return;
+	}
+
 	// 인자를 받는 명령은 문자열 전체 비교로는 걸러지지 않으므로 먼저 위임한다.
 	FString StatMessage;
 	if (FStatOverlay::ExecCommand(CommandLine, StatMessage))

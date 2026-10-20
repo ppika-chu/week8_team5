@@ -4,6 +4,7 @@
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Core/EngineLog.h"
 
+class FShadowRenderer;
 
 
 struct FLogData
@@ -22,6 +23,11 @@ public:
 
 	void ClearLog();
 
+	void SetShadowRenderer(FShadowRenderer* InShadowRenderer)
+	{
+		ShadowRenderer = InShadowRenderer;
+	}
+
 	//template<typename... Args>
 	//void AddLog(ELogVerbosity Verbosity, std::format_string<Args...> fmt, Args&&... args)
 	//{
@@ -33,6 +39,8 @@ public:
 	int TextEditCallback(ImGuiInputTextCallbackData* data);
 
 private:
+	FShadowRenderer* ShadowRenderer = nullptr;
+
 	char                  InputBuf[256];
 	TArray<FLogData>       Items;
 	TArray<FString>		  Commands;

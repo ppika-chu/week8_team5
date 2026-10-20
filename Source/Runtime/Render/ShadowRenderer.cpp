@@ -327,6 +327,7 @@ void FShadowRenderer::SetParameters(
 				});
 
 			const bool bNeedsRender =
+				!bEnableShadowMapCache ||
 				Light.bAlwaysUpdate ||
 				!Cache->bHasRenderedContent ||
 				Cache->RenderedRevision != Data.Revision;
@@ -419,16 +420,18 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
 	const FShadowAtlasAllocation& Tile = Cache->Allocation;
 
+	// Invalidate cached content before attempting to update the tile.
+	Cache->bHasRenderedContent = false;
+
 	// Clear the depth region for the current shadow tile
 	if (!RenderCommand::ClearDepthRegion(
 		ShadowAtlas.GetTexture(),
 		Tile.X, Tile.Y,
 		Tile.Width, Tile.Height))
 	{
-		// If ClearDepthRegion fails, don't update the revision
+		// Keep the cache invalid and leave the revision unchanged on failure.
 		return;
 	}
-	Cache->bHasRenderedContent = false;
 
 	RenderCommand::SetViewport(
 		Tile.X, Tile.Y, Tile.Width, Tile.Height

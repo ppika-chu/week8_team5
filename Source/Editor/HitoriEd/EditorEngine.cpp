@@ -117,6 +117,7 @@ bool UEditorEngine::Init()
 
 	ShadowRenderer = MakeUnique<FShadowRenderer>();
 	ShadowRenderer->Init(Renderer);
+	OutputLogPanel->SetShadowRenderer(ShadowRenderer.get());
 
 
 	// 필요한 Panel들 추가후 raw pointer 반환(소유권 = EditorUI)
