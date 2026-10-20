@@ -17,6 +17,7 @@ public:
 	~FDetailsPanel();
 
 	bool Init() override;
+	void SetShadowRenderer(FShadowRenderer& InShadowRenderer) { ShadowRenderer = &InShadowRenderer; }
 	void Tick(float DeltaTime) override;
 	void OnRender() override;
 
@@ -59,5 +60,8 @@ private:
 
 	USceneComponent* PendingDroppedComponent = nullptr;
 	USceneComponent* PendingDragComponent = nullptr;
+
+	// For shadow map preview
+	FShadowRenderer* ShadowRenderer = nullptr;
 };
 

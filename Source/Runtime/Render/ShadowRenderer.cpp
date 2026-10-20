@@ -509,3 +509,54 @@ void FShadowRenderer::EndShadowPass()
 	const uint64 ElapsedCycles = FPlatformTime::GetCycles64() - ShadowPassStartCycles;
 	CurrentViewStats.CpuTimeMs = FPlatformTime::ToMilliseconds64(ElapsedCycles);
 }
+
+TArray<FShadowAtlasAllocation> FShadowRenderer::GetShadowMapRects(uint32 LightID) const
+{
+	TArray<std::pair<uint64, FShadowAtlasAllocation>> Sorted;
+	for (const auto& [Key, Cache] : ShadowCache)
+	{
+		if (Key.LightID == LightID)
+		{
+			Sorted.Add({ Key.MapIndex, Cache.Allocation });
+		}
+	}
+
+	std::sort(Sorted.begin(), Sorted.end(), [](const std::pair<uint64, FShadowAtlasAllocation>& A, const std::pair<uint64, FShadowAtlasAllocation>& B) {
+		if (A.second.Y == B.second.Y)
+			return A.second.X < B.second.X;
+		return A.second.Y < B.second.Y;
+		});
+	
+	TArray<FShadowAtlasAllocation> Result;
+	for (const auto& [Index, Allocation] : Sorted)
+	{
+		Result.Add(Allocation);
+	}
+	
+	return Result;
+}
+
+TArray<FShadowInfo> FShadowRenderer::GetShadowInfosByLightUUID(uint32 LightID) const
+{
+	TArray<std::pair<uint64, FShadowInfo>> Sorted;
+	for (uint32 i = 0; i < static_cast<uint32>(ShadowFrameEntries.Num()); ++i)
+	{
+		const FShadowFrameEntry& Frame = ShadowFrameEntries[i];
+		if (Frame.Key.LightID == LightID)
+		{
+			Sorted.Add({ Frame.Key.MapIndex, ShadowInfos[i] });
+		}
+	}
+
+	std::sort(Sorted.begin(), Sorted.end(), [](const std::pair<uint64, FShadowInfo>& A, const std::pair<uint64, FShadowInfo>& B) {
+		return A.first < B.first;
+		});
+
+	TArray<FShadowInfo> Result;
+	for (const auto& [Index, Info] : Sorted)
+	{
+		Result.Add(Info);
+	}
+
+	return Result;
+}
