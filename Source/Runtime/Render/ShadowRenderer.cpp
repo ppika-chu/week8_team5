@@ -55,6 +55,25 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 	return true;
 }
 
+static bool AreShadowMatricesEqual(
+	const FMatrix& Rendered,
+	const FMatrix& Requested)
+{
+	// Compare exactly: FMatrix equality otherwise allows a tolerance.
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		for (int32 Column = 0; Column < 4; ++Column)
+		{
+			if (Rendered.M[Row][Column] != Requested.M[Row][Column])
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 void FShadowRenderer::SetParameters(
 	uint64 SceneID,
 	TArray<FLightShadowData>&& Lights,
@@ -330,7 +349,10 @@ void FShadowRenderer::SetParameters(
 				!bEnableShadowMapCache ||
 				Light.bAlwaysUpdate ||
 				!Cache->bHasRenderedContent ||
-				Cache->RenderedRevision != Data.Revision;
+				Cache->RenderedRevision != Data.Revision ||
+				!AreShadowMatricesEqual(
+					Cache->RenderedLightViewProj,
+					Data.LightViewProj);
 
 			if (bNeedsRender)
 			{
@@ -448,6 +470,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	++CurrentViewStats.UpdatedMapCount;
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
+	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
 	Cache->bHasRenderedContent = true;
 }
 

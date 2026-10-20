@@ -90,6 +90,9 @@ struct FShadowCacheEntry
 {
 	FShadowAtlasAllocation Allocation{};
 
+	// 캐시된 깊이 데이터를 생성할 때 사용한 행렬.
+	FMatrix RenderedLightViewProj;
+
 	uint64 RenderedRevision = 0;
 	bool bHasRenderedContent = false;
 };

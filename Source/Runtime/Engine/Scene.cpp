@@ -237,8 +237,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			Directional.bDebugCascades = Shadow.bDebugCascades ? 1u : 0u;
 			const uint32 Resolution = Directional.ResolutionScale * DefaultShadowResolution;
 			
-			// TODO: 필요할 때만 리비전을 늘리도록 한다.
-			Proxy->UpdateShadowRevision();
+			// Cascade별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
+			// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.
+			// Proxy->UpdateShadowRevision();
 			for (uint32 i = 0; i < Count; ++i)
 			{
 				FVector Corners[8];
@@ -273,8 +274,9 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		Local.ResolutionScale = LightComponent->GetShadowResolutionScale();
 		const uint32 Resolution = Local.ResolutionScale * DefaultShadowResolution;
 
-		// TODO: 필요할 때만 리비전을 늘리도록 한다.
-		LightProxy->UpdateShadowRevision();
+		// 맵별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
+		// TODO: Caster 등 행렬 외 변경을 감지할 때 Revision을 늘린다.
+		// LightProxy->UpdateShadowRevision();
 		switch (LightComponent->GetLightType())
 		{
 		case ELightType::Spot:
