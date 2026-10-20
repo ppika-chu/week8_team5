@@ -268,6 +268,8 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		}
 	}
 
+	const FFrustumPlanes CameraFrustum = ExtractFrustumPlanes(CameraViewProj);
+
 	for (FLocalLightSceneProxy* LightProxy : LocalLightProxies)
 	{
 		FLightRenderParameters& LightParameter = LocalLightParameters[LightProxy->PackedIndex];
@@ -281,6 +283,13 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
 
 		if (!LightProxy->IsVisible() || !LightComponent->IsCastingShadows() || FarZ <= NearZ || Resolution == 0)
+		{
+			continue;
+		}
+
+		// 영향 구를 완전히 감싸는 AABB. Extent는 각 축의 절반 크기다.
+		const FAABB LightBounds{ LightParameter.Position, FVector(FarZ, FarZ, FarZ) };
+		if (!IsAABBInFrustum(LightBounds, CameraFrustum))
 		{
 			continue;
 		}
