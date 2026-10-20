@@ -54,6 +54,8 @@
                                         "Z": 1.0
                                     }
                                 },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         }
@@ -163,6 +165,8 @@
                                         "Z": 1.0
                                     }
                                 },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         },
@@ -194,6 +198,8 @@
                                         "Z": 0.5
                                     }
                                 },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         }
@@ -251,6 +257,8 @@
                                         "Z": 1.0
                                     }
                                 },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         }
@@ -360,6 +368,8 @@
                                         "Z": 1.0
                                     }
                                 },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         }

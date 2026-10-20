@@ -325,7 +325,10 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 	}
 
 	Renderer->SetLighting(Constants, LocalLightParameters);
-	ShadowRenderer->SetParameters(0, std::move(Lights), MaxDirectionalLights + MaxLocalLights);
+	ShadowRenderer->SetParameters(
+		GetSceneID(),
+		std::move(Lights),
+		MaxDirectionalLights + MaxLocalLights);
 }
 
 FDirectionalLightSceneProxy* FScene::GetMainDirectionalLight()
