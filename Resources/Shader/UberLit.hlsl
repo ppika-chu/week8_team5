@@ -130,9 +130,11 @@ struct FShadowInfo
     matrix LightViewProjection;
     float2 AtlasOffset;
     float2 AtlasScale;
+    
     float DepthBias;
     float PrescaledTangentTheta;
-    float2 FShadowInfo_padding;
+    uint ArrayIndex;
+    float FShadowInfo_padding;
 };
 
 struct FLightShadowRange
@@ -327,7 +329,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         if (any(SampleUV < TileMinUV) || any(SampleUV >= TileMaxUV))
             continue;
         float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
-        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, 0.0f), 0);
+        float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, (float)Info.ArrayIndex), 0);
         if (DepthSampled < ReceiverDepth)
         {
             BlockAverage += DepthSampled;
@@ -348,7 +350,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
             if (any(SampleUV < TileMinUV + 0.5f * TexelStep) || any(SampleUV > TileMaxUV - 0.5f * TexelStep))
                 continue;
             float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - Info.DepthBias;
-            PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(SampleUV, 0.0f), ReceiverDepth);
+            PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(SampleUV, (float)Info.ArrayIndex), ReceiverDepth);
             ++SampleCount;
         }
         PercentLit = SampleCount > 0 ? PercentLit / SampleCount : 1.0f;
@@ -458,7 +460,7 @@ float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
     const int2 Texel = clamp(int2(AtlasUV * AtlasSize), TileMin, TileMax);
     
     // x, y, array index, mip level
-    const float MapDepth = ShadowMapAtlas.Load(int4(Texel, 0, 0));
+    const float MapDepth = ShadowMapAtlas.Load(int4(Texel, (int) Info.ArrayIndex, 0));
     
     return Ndc.z - Info.DepthBias > MapDepth ? 0.0f : 1.0f;
 }

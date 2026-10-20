@@ -43,7 +43,8 @@ struct alignas(16) FShadowInfo
 
 	float DepthBias;
 	float PrescaledTangentTheta;
-	float FShadowInfo_padding[2];
+	uint32 ArrayIndex = 0;
+	float FShadowInfo_padding;
 };
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기

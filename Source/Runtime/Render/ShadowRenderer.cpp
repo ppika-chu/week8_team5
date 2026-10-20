@@ -318,6 +318,7 @@ void FShadowRenderer::SetParameters(
 				},
 				.DepthBias = Light.DepthBias,
 				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
+				.ArrayIndex = Allocation.ArrayIndex
 				});
 
 			ShadowFrameEntries.Add(FShadowFrameEntry{

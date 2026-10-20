@@ -10,6 +10,8 @@ struct FShadowAtlasAllocation
 	uint32 Y = 0;
 	uint32 Width = 0;
 	uint32 Height = 0;
+
+	uint32 ArrayIndex = 0;
 };
 
 class FShadowAtlas
