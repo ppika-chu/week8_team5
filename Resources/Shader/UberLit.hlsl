@@ -132,7 +132,8 @@ struct FShadowInfo
     float2 AtlasScale;
     float DepthBias;
     float PrescaledTangentTheta;
-    float2 FShadowInfo_padding;
+    uint bShadowActive;
+    float Padding;
 };
 
 struct FLightShadowRange
@@ -296,6 +297,12 @@ bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out f
 // 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
 float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY)
 {
+    // 비활성 Cascade도 선택과 블렌딩에 참여하며 가시율은 1이다.
+    if (Info.bShadowActive == 0)
+    {
+        return 1.0f;
+    }
+
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
     float2 SearchCasterRadius = ReceiverUV.z * Info.PrescaledTangentTheta * Info.AtlasScale.xy;
     float3 DuvDx = mul(float4(WorldPosDDX, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
@@ -431,6 +438,11 @@ float CalcDirectionalShadow(float3 WorldPos)
 
 float SampleShadowInfo(FShadowInfo Info, float3 WorldPos)
 {
+    if (Info.bShadowActive == 0)
+    {
+        return 1.0f;
+    }
+
     const float4 LightClip =
         mul(float4(WorldPos, 1.0f), Info.LightViewProjection);
     

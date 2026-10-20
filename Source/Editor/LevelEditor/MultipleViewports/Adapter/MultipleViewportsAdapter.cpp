@@ -17,6 +17,9 @@
 #include "Input/InputSystem.h"
 #include "UObject/UObjectIterator.h"
 #include "Asset/LOD/StaticMeshLODSelector.h"
+#include "Render/Mesh.h"
+#include "Render/Material.h"
+#include "Render/Shader.h"
 
 #include <algorithm>
 #include <cassert>
@@ -24,6 +27,80 @@
 
 namespace
 {
+	bool CanRenderShadowDepthSection(
+		const FCachedMeshSection& Section,
+		const FIndexBuffer& IndexBuffer)
+	{
+		const UMaterial* Material = Section.Material;
+		if (!Material ||
+			Material->BlendState != EBlendState::Opaque ||
+			Material->DepthStencilState != EDepthStencilState::Default)
+		{
+			return false;
+		}
+
+		const FShaderProgram* Program = Material->Shader;
+		// 현재 바인딩은 VS와 PS 객체를 참조하며, 깊이 생성에는 유효한 VS가 필요하다.
+		if (!Program ||
+			!Program->VertexShader ||
+			!Program->VertexShader->IsValid() ||
+			!Program->PixelShader)
+		{
+			return false;
+		}
+
+		const uint32 BufferIndexCount = IndexBuffer.GetIndexCount();
+		// 기존 DrawPackets의 0 = 전체 인덱스 버퍼 규칙을 유지한다.
+		const uint32 DrawIndexCount = Section.IndexCount != 0
+			? Section.IndexCount : BufferIndexCount;
+
+		return DrawIndexCount >= 3 &&
+			Section.StartIndex <= BufferIndexCount &&
+			DrawIndexCount <= BufferIndexCount - Section.StartIndex;
+	}
+
+	bool CanRenderShadowCaster(const UStaticMeshComponent& Component)
+	{
+		const UStaticMesh* Mesh = Component.GetStaticMesh();
+		const FPrimitiveSceneProxy* Proxy = Component.GetSceneProxy();
+		if (!Mesh || !Proxy ||
+			Component.IsEditorIcon() ||
+			!Proxy->IsCastingShadows())
+		{
+			return false;
+		}
+
+		const FMeshRenderState* State = Proxy->GetRenderState();
+		const FVertexBuffer* VertexBuffer = Mesh->GetVertexBuffer(0);
+		const FIndexBuffer* IndexBuffer = Mesh->GetIndexBuffer(0);
+		if (!State || State->LODCount == 0 ||
+			!VertexBuffer || !VertexBuffer->GetBuffer() ||
+			!IndexBuffer || !IndexBuffer->GetBuffer())
+		{
+			return false;
+		}
+
+		const FCachedMeshLOD& LOD = State->LODs[0];
+		const uint32 SectionCount = State->Sections.Num();
+		if (LOD.FirstSection > SectionCount ||
+			LOD.NumSections > SectionCount - LOD.FirstSection)
+		{
+			return false;
+		}
+
+		for (uint32 Index = 0; Index < LOD.NumSections; ++Index)
+		{
+			const FCachedMeshSection& Section =
+				State->Sections[LOD.FirstSection + Index];
+			if (CanRenderShadowDepthSection(Section, *IndexBuffer))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	constexpr float Pi = 3.14159265358979323846f;
 	constexpr float MaximumCameraPitchDegrees = 89.0f;
 	constexpr float MaximumRotationDegreesPerFrame = 45.0f;
@@ -784,22 +861,13 @@ void FMultipleViewportsAdapter::CollectShadowCasterStates(const FMatrix& LightVi
 
 		auto* StaticComponent = Cast<UStaticMeshComponent>(Found->Primitive);
 		if (!StaticComponent ||
-			!StaticComponent->GetStaticMesh() ||
-			StaticComponent->IsEditorIcon())
+			!CanRenderShadowCaster(*StaticComponent))
 		{
 			continue;
 		}
 
 		const FPrimitiveSceneProxy* Proxy = StaticComponent->GetSceneProxy();
-		const bool bCastShadows = Proxy
-			? Proxy->IsCastingShadows()
-			: StaticComponent->IsCastingShadows();
-		if (!bCastShadows)
-		{
-			continue;
-		}
-
-		const uint64 TransformRevision = Proxy ? Proxy->GetTransformRevision() : 0;
+		const uint64 TransformRevision = Proxy->GetTransformRevision();
 		OutCasterStates.Add(FShadowCasterState{
 			.CasterID = static_cast<uint64>(Id),
 			.TransformRevision = TransformRevision
@@ -807,13 +875,11 @@ void FMultipleViewportsAdapter::CollectShadowCasterStates(const FMatrix& LightVi
 	}
 }
 
-void FMultipleViewportsAdapter::BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue)
+void FMultipleViewportsAdapter::BuildShadowQueue(
+	const TArray<FShadowCasterState>& CasterStates,
+	FRenderQueue& OutQueue)
 {
 	OutQueue.Reset();
-
-	// 캐시 비교와 실제 렌더링에 같은 Caster 선택 조건을 사용한다.
-	TArray<FShadowCasterState> CasterStates;
-	CollectShadowCasterStates(LightViewProj, CasterStates);
 
 	for (const FShadowCasterState& CasterState : CasterStates)
 	{

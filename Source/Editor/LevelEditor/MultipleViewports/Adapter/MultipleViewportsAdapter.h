@@ -124,7 +124,9 @@ public:
     FMatrix GetEngineProjection(int32 ViewIndex) const;
 
     void CollectShadowCasterStates(const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates);
-    void BuildShadowQueue(const FMatrix& LightViewProj, FRenderQueue& OutQueue);
+    void BuildShadowQueue(
+        const TArray<FShadowCasterState>& CasterStates,
+        FRenderQueue& OutQueue);
 
 private:
     // Override가 있으면 그 카메라를, 없으면 저장 카메라를 반환한다. 외부 View는 Override만 쓴다.
