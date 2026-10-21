@@ -8,11 +8,12 @@
 
 #include <algorithm>
 
-constexpr uint32 MaxShadowInfos = 64;
+constexpr uint32 MaxShadowInfos = 256;
 
 constexpr uint32 MinShadowAtlasSize = 1024;
-constexpr uint32 MaxShadowAtlasSize = 16384;
+constexpr uint32 MaxShadowAtlasSize = 8192;
 
+constexpr uint32 MaxShadowAtlasLayers = 16;
 
 bool FShadowRenderer::Init(FRenderer* InRenderer)
 {
@@ -48,7 +49,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	if (!RenderCommand::SupportsClearView())
 	{
-		// ClearView �������� ������ ShadowRenderer�� ����� �� ����.
+		// ClearView 지원하지 않으면 ShadowRenderer를 사용할 수 없다.
 		return false;
 	}
 
@@ -108,6 +109,7 @@ void FShadowRenderer::SetParameters(
 	if (CachedSceneID != SceneID)
 	{
 		ShadowCache.Reset();
+		LastShadowRequests.Reset();
 		CachedSceneID = SceneID;
 	}
 
@@ -194,7 +196,10 @@ void FShadowRenderer::SetParameters(
 	// 2. Check for layout changes
 	// Re-build if the number, key, or resolution of shadow requests has changed
 	bool bLayoutChanged =
-		ShadowCache.Num() != static_cast<uint32>(Requests.Num());
+		bRetryShadowAllocation ||
+		LastShadowRequests.Num() != Requests.Num();
+
+	bRetryShadowAllocation = false;
 
 	if (!bLayoutChanged)
 	{
@@ -213,64 +218,128 @@ void FShadowRenderer::SetParameters(
 		}
 	}
 
-	bool bReady = true;
 
 	if (Requests.Num() == 0)
 	{
 		ShadowCache.Reset();
 	}
-	else if (bLayoutChanged) // Pack only if the layout has changed
+	else if (bLayoutChanged)
 	{
-		// 3. Try to pack the shadow maps into the atlas
 		TArray<FShadowAtlasAllocation> PackedAllocations;
+		uint32 RequiredLayers = 0;
 
-		uint32 CandidateSize = FMath::Max(
+		// 이미 확보한 용량에 전체 요청이 들어가는지 먼저 확인한다.
+		bool bAllPacked = FShadowAtlas::TryPack(
+			Resolutions,
 			ShadowAtlas.GetSize(),
-			MinShadowAtlasSize);
+			ShadowAtlas.GetLayerCount(),
+			&PackedAllocations,
+			&RequiredLayers);
 
-		bReady = false;
+		bool bCapacityReady = bAllPacked;
 
-		while (CandidateSize <= MaxShadowAtlasSize)
+		if (!bAllPacked)
 		{
-			if (FShadowAtlas::TryPack(
-				Resolutions,
-				CandidateSize,
-				&PackedAllocations))
+			uint32 CandidateSize = FMath::Max(
+				ShadowAtlas.GetSize(),
+				MinShadowAtlasSize);
+
+			// 한 장의 크기를 먼저 늘린다.
+			while (CandidateSize <= MaxShadowAtlasSize)
 			{
-				bReady = ShadowAtlas.EnsureTextureSize(CandidateSize);
-				break;
+				bAllPacked = FShadowAtlas::TryPack(
+					Resolutions,
+					CandidateSize,
+					1,
+					&PackedAllocations,
+					&RequiredLayers);
+
+				if (bAllPacked || CandidateSize == MaxShadowAtlasSize)
+				{
+					break;
+				}
+
+				CandidateSize =
+					CandidateSize > MaxShadowAtlasSize / 2
+					? MaxShadowAtlasSize
+					: CandidateSize * 2;
 			}
 
-			// Prevent overflow and unnecessary iterations
-			if (CandidateSize > MaxShadowAtlasSize / 2)
+			if (!bAllPacked && CandidateSize == MaxShadowAtlasSize)
 			{
-				break;
+				bAllPacked = FShadowAtlas::TryPack(
+					Resolutions,
+					CandidateSize,
+					MaxShadowAtlasLayers,
+					&PackedAllocations,
+					&RequiredLayers);
 			}
 
-			CandidateSize *= 2;
+			// 전체가 안 들어갔어도, 성공한 앞부분의 용량 확보를 시도한다.
+			if (PackedAllocations.Num() > 0)
+			{
+				bCapacityReady = ShadowAtlas.EnsureTextureSize(
+					CandidateSize,
+					RequiredLayers);
+			}
+
+			if (!bCapacityReady)
+			{
+				// GPU 할당 실패 시 실제 보유한 용량으로 다시 계산한다.
+				FShadowAtlas::TryPack(
+					Resolutions,
+					ShadowAtlas.GetSize(),
+					ShadowAtlas.GetLayerCount(),
+					&PackedAllocations,
+					&RequiredLayers);
+			}
 		}
 
-		// Replace the cache with new allocations if packing was successful
-		if (bReady)
+		uint32 PackedCount = PackedAllocations.Num();
+
+		// 마지막 라이트가 일부만 들어갔다면 그 라이트 전체를 제외한다.
+		if (PackedCount > 0 && PackedCount < Requests.Num())
 		{
-			assert(PackedAllocations.Num() == Requests.Num());
+			const uint64 FirstRejectedLightID =
+				Requests[PackedCount].Key.LightID;
 
-			ShadowCache.Reset();
-
-			for (uint32 i = 0;
-				i < static_cast<uint32>(Requests.Num());
-				++i)
+			while (PackedCount > 0 &&
+				Requests[PackedCount - 1].Key.LightID ==
+				FirstRejectedLightID)
 			{
-				ShadowCache.Add(
-					Requests[i].Key,
-					FShadowCacheEntry{
-						.Allocation = PackedAllocations[i],
-						.RenderedRevision = 0,
-						.bHasRenderedContent = false
-					});
+				--PackedCount;
 			}
+		}
+
+		// 간단한 구현: 재배치할 때 수용한 맵을 모두 다시 그린다.
+		ShadowCache.Reset();
+
+		for (uint32 i = 0; i < PackedCount; ++i)
+		{
+			FShadowCacheEntry Entry{};
+			Entry.Allocation = PackedAllocations[i];
+			Entry.RenderedRevision = 0;
+			Entry.bHasRenderedContent = false;
+
+			ShadowCache.Add(Requests[i].Key, std::move(Entry));
+		}
+
+		// 전체 요청을 기억해야 부분 수용 상태에서도 재패킹이 반복되지 않는다.
+		LastShadowRequests.Reset(Requests.Num());
+
+		for (const FShadowRequest& Request : Requests)
+		{
+			LastShadowRequests.Add(FShadowRequestSignature{
+				.Key = Request.Key,
+				.Resolution = Request.Resolution,
+				});
 		}
 	}
+
+	const bool bReady =
+		ShadowAtlas.GetTexture() != nullptr &&
+		ShadowAtlas.GetSize() > 0 &&
+		ShadowAtlas.GetLayerCount() > 0;
 
 	// 4. Update GPU data and dirty lists based on the packing results
 	if (bReady && Requests.Num() > 0)
@@ -288,7 +357,11 @@ void FShadowRenderer::SetParameters(
 			const FShadowCacheEntry* Cache =
 				ShadowCache.Find(Request.Key);
 
-			assert(Cache);
+			//assert(Cache);
+			if (!Cache)
+			{
+				break;
+			}
 
 			const FShadowAtlasAllocation& Allocation =
 				Cache->Allocation;
@@ -320,6 +393,7 @@ void FShadowRenderer::SetParameters(
 				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
 				.SlopeBias = Light.SlopeBias,
 				.NearPlane = Data.NearPlane,
+				.ArrayIndex = Allocation.ArrayIndex,
 				});
 
 			ShadowFrameEntries.Add(FShadowFrameEntry{
@@ -347,6 +421,7 @@ void FShadowRenderer::SetParameters(
 
 	CurrentViewStats.AllocatedMapCount = static_cast<uint32>(ShadowInfos.Num());
 	CurrentViewStats.AtlasSize = ShadowAtlas.GetSize();
+	CurrentViewStats.AtlasLayerCount = ShadowAtlas.GetLayerCount();
 	for (const auto& [Key, Cache] : ShadowCache)
 	{
 		const FShadowAtlasAllocation& Allocation = Cache.Allocation;
@@ -407,7 +482,7 @@ void FShadowRenderer::BeginShadowPass()
 		},
 		.DepthStencil = {
 			.Texture = ShadowAtlas.GetTexture(),
-			.LoadOp = ERenderTargetLoadOp::Load, // LoadOp�� Load�� �����Ͽ� ���� ������ ����
+			.LoadOp = ERenderTargetLoadOp::Load, // LoadOp을 Load로 설정하여 기존 내용을 유지
 		}
 	};
 
@@ -487,11 +562,36 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	// Invalidate cached content before attempting to update the tile.
 	Cache->bHasRenderedContent = false;
 
+	FTexture2D* AtlasTexture = ShadowAtlas.GetTexture();
+
+	if (!AtlasTexture ||
+		!AtlasTexture->GetSliceDSV(Tile.ArrayIndex))
+	{
+		return;
+	}
+
+	FRenderingInfo Pass{
+		.ViewportSetting = {
+			.StartX = static_cast<int32>(Tile.X),
+			.StartY = static_cast<int32>(Tile.Y),
+			.Width = Tile.Width,
+			.Height = Tile.Height
+		},
+		.DepthStencil = {
+			.Texture = AtlasTexture,
+			.LoadOp = ERenderTargetLoadOp::Load,
+			.ArrayIndex = Tile.ArrayIndex,
+		},
+	};
+
+	RenderCommand::BeginRenderPass(Pass);
+
 	// Clear the depth region for the current shadow tile
 	if (!RenderCommand::ClearDepthRegion(
-		ShadowAtlas.GetTexture(),
+		AtlasTexture,
 		Tile.X, Tile.Y,
-		Tile.Width, Tile.Height))
+		Tile.Width, Tile.Height,
+		1.0f, Tile.ArrayIndex))
 	{
 		// Keep the cache invalid and leave the revision unchanged on failure.
 		return;
@@ -516,7 +616,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
 	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
-	// 깊이를 다시 그린 뒤에만 캐시의 Caster 기록을 교체한다.
+	// 깊이�??�시 그린 ?�에�?캐시??Caster 기록??교체?�다.
 	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
 	ShadowInfo.bShadowActive = 1;

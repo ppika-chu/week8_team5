@@ -49,7 +49,8 @@ struct alignas(16) FShadowInfo
 	float NearPlane;
 	// 이번 뷰에서 유효한 깊이가 있는 맵만 샘플링한다.
 	uint32 bShadowActive = 0;
-	float Padding[3] = {};
+	uint32 ArrayIndex = 0;
+	float Padding[2] = {};
 };
 static_assert(sizeof(FShadowInfo) == 112);
 
@@ -118,6 +119,12 @@ struct FShadowFrameEntry
 
 class FShadowRenderer
 {
+private:
+	struct FShadowRequestSignature
+	{
+		FShadowKey Key{};
+		uint32 Resolution = 0;
+	};
 public:
 	bool Init(FRenderer* InRenderer);
 
@@ -154,6 +161,11 @@ public:
 	TArray<FShadowAtlasAllocation> GetShadowMapRects(uint32 LightID) const;
 	TArray<FShadowInfo> GetShadowInfosByLightUUID(uint32 LightID) const;
 
+	void RequestShadowAllocationRetry()
+	{
+		bRetryShadowAllocation = true;
+	}
+
 private:
 	FRenderer* Renderer = nullptr;
 	FShadowRenderStats CurrentViewStats{};
@@ -186,6 +198,9 @@ private:
 	TArray<uint32> DirtyShadowIndices;
 
 	uint64 CachedSceneID = 0;
+
+	TArray<FShadowRequestSignature> LastShadowRequests;
+	bool bRetryShadowAllocation = false;
 
 	/* */
 	const float HalfDirectionalLightSourceAngularDiameterRad = 0.0046748644f;
