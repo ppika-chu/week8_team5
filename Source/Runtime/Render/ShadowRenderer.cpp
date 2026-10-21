@@ -338,7 +338,9 @@ void FShadowRenderer::SetParameters(
 				},
 				.DepthBias = Light.DepthBias,
 				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
-				.ArrayIndex = Allocation.ArrayIndex
+				.SlopeBias = Light.SlopeBias,
+				.NearPlane = Data.NearPlane,
+				.ArrayIndex = Allocation.ArrayIndex,
 				});
 
 			ShadowFrameEntries.Add(FShadowFrameEntry{
@@ -427,8 +429,6 @@ void FShadowRenderer::BeginShadowPass()
 
 	RenderCommand::BeginRenderPass(Pass);
 
-	RenderCommand::SetRasterizerState(
-		ERasterizerState::ShadowDepth);
 	RenderCommand::SetPrimitiveTopology(
 		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
@@ -517,6 +517,13 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 		// Keep the cache invalid and leave the revision unchanged on failure.
 		return;
 	}
+
+	const FLightShadowRange& DirectionalRange = LightShadowRanges[0];
+	const bool bDirectional = ShadowInfoIndex >= DirectionalRange.Offset && ShadowInfoIndex < DirectionalRange.Offset + DirectionalRange.Count;
+	RenderCommand::SetRasterizerState(bDirectional ? ERasterizerState::DirectionalShadowDepth : ERasterizerState::ShadowDepth);
+	RenderCommand::SetViewport(
+		Tile.X, Tile.Y, Tile.Width, Tile.Height
+	);
 
 	Renderer->RenderQueueSorting(
 		ShadowQueue,

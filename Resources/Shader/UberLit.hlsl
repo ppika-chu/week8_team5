@@ -544,7 +544,7 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
     const float SlopeBias = max(DepthPerTexel.x, DepthPerTexel.y) * SlopeScale;
     const float ReceiverBias = ConstantBias + SlopeBias * Info.SlopeBias;
     if (Light.SourceRadius <= 0.0f)
-        return ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, AtlasUV, Ndc.z - ReceiverBias);
+        return ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(AtlasUV, (float)Info.ArrayIndex), Ndc.z - ReceiverBias);
 
     const float2 SourceScaleUV = 0.5f * Light.SourceRadius * ProjectionScale * Info.AtlasScale;
     const float2 MaxSampleRadius = 40.0f * TexelStep;
@@ -556,7 +556,7 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
         const float2 SampleUV = AtlasUV + SearchRadius * PoissonDisk[i];
         const float2 TexelCenterUV = (floor(SampleUV * AtlasSize) + 0.5f) * TexelStep;
         const float ReceiverDepth = Ndc.z + dot(DepthGradient, TexelCenterUV - AtlasUV) - ReceiverBias;
-        const float MapDepth = ShadowMapAtlas.SampleLevel(PointSampler, SampleUV, 0);
+        const float MapDepth = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, (float)Info.ArrayIndex), 0);
         if (MapDepth < ReceiverDepth)
         {
             // 원근 투영 깊이는 각 탭을 선형화한 뒤 평균한다.
