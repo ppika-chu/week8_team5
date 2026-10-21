@@ -134,6 +134,8 @@ struct FShadowInfo
     float PrescaledTangentTheta;
     float SlopeBias;
     float NearPlane;
+    uint bShadowActive;
+    float3 Padding;
 };
 
 struct FLightShadowRange
@@ -342,6 +344,12 @@ float CalcDirectionalShadowBias(FShadowInfo Info, float3 WorldNormal, float2 Til
 // 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
 float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal, float2x2 PoissonRotation)
 {
+    // 비활성 Cascade도 선택과 블렌딩에 참여하며 가시율은 1이다.
+    if (Info.bShadowActive == 0)
+    {
+        return 1.0f;
+    }
+
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
     uint TexelCountX, TexelCountY;
     ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
@@ -514,6 +522,11 @@ float2 CalcLocalShadowDepthGradientFromNormal(FShadowInfo Info, float4 LightClip
 
 float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 WorldPos, float3 WorldNormal, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
 {
+    if (Info.bShadowActive == 0)
+    {
+        return 1.0f;
+    }
+
     const float4 LightClip =
         mul(float4(WorldPos, 1.0f), Info.LightViewProjection);
     

@@ -354,14 +354,6 @@ void FShadowRenderer::SetParameters(
 			static_cast<uint64>(Allocation.Width) * Allocation.Height;
 	}
 
-	// If packing failed, ShadowInfos is empty, and Range.Count remains 0 for all lights.
-	if (ShadowInfos.Num() > 0)
-	{
-		RenderCommand::UpdateBufferData(
-			ShadowInfosBuffer.get(),
-			ShadowInfos.GetData(),
-			static_cast<uint32>(ShadowInfos.size() * sizeof(FShadowInfo)));
-	}
 
 	// Upload Count = 0 even if there is no request,
 	// so that the last frame's shadow data is not used in the next frame.
@@ -369,6 +361,19 @@ void FShadowRenderer::SetParameters(
 		LightShadowRangesBuffer.get(),
 		LightShadowRanges.GetData(),
 		static_cast<uint32>(LightShadowRanges.size() * sizeof(FLightShadowRange)));
+}
+
+void FShadowRenderer::UploadShadowInfos()
+{
+	if (ShadowInfos.Num() == 0)
+	{
+		return;
+	}
+
+	RenderCommand::UpdateBufferData(
+		ShadowInfosBuffer.get(),
+		ShadowInfos.GetData(),
+		static_cast<uint32>(ShadowInfos.Num() * sizeof(FShadowInfo)));
 }
 
 void FShadowRenderer::BindForLighting() const
@@ -424,6 +429,20 @@ void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShad
 		return Left.CasterID < Right.CasterID;
 	});
 
+	FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	ShadowInfo.bShadowActive = 0;
+
+	// 빈 맵은 Clear와 Draw를 생략하되 마지막 렌더 기록은 보관한다.
+	if (Requested.Num() == 0)
+	{
+		const int32 DirtyListIndex = DirtyShadowIndices.Find(ShadowInfoIndex);
+		if (DirtyListIndex != INDEX_NONE)
+		{
+			DirtyShadowIndices.RemoveAtSwap(static_cast<uint32>(DirtyListIndex));
+		}
+		return;
+	}
+
 	// 이미 Dirty여도 렌더링 후 저장할 이번 목록은 위에서 확보한다.
 	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
 	{
@@ -446,7 +465,10 @@ void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShad
 	if (!bSameCasters)
 	{
 		DirtyShadowIndices.Add(ShadowInfoIndex);
+		return;
 	}
+
+	ShadowInfo.bShadowActive = 1;
 }
 
 void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex)
@@ -456,8 +478,11 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	FShadowCacheEntry* Cache = ShadowCache.Find(Frame.Key);
 	assert(Cache);
 
-	const FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
+	FShadowInfo& ShadowInfo = ShadowInfos[ShadowInfoIndex];
 	const FShadowAtlasAllocation& Tile = Cache->Allocation;
+
+	// Clear 실패 시 이전 깊이를 샘플링하지 않도록 먼저 비활성화한다.
+	ShadowInfo.bShadowActive = 0;
 
 	// Invalidate cached content before attempting to update the tile.
 	Cache->bHasRenderedContent = false;
@@ -494,6 +519,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 	// 깊이를 다시 그린 뒤에만 캐시의 Caster 기록을 교체한다.
 	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
+	ShadowInfo.bShadowActive = 1;
 }
 
 void FShadowRenderer::EndShadowPass()
