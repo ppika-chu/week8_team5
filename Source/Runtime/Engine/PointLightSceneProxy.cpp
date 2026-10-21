@@ -15,4 +15,5 @@ void FPointLightSceneProxy::GetLightShaderParameters(FLightRenderParameters& Out
     Out.Color = FVector(Color.R, Color.G, Color.B);
     Out.Intensity = PointLightComponent->GetIntensity();
     Out.FalloffExponent = PointLightComponent->GetFalloff();
+    Out.SourceRadius = FMath::Max(PointLightComponent->GetSourceRadius(), 0.0f);
 }

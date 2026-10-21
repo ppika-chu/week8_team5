@@ -14,6 +14,7 @@ struct FShadowData
 	FMatrix LightViewProj;
 	float Depth = 0.0f;
 	float Width = 0.0f;
+	float NearPlane = 0.0f;
 
 	uint64 Revision = 0;
 };
@@ -28,6 +29,7 @@ struct FLightShadowData
 								// Slot 0 is reserved for directional Light.
 	TArray<FShadowData> Maps;	// Maps에 Cascade 수만큼 FShadowData 저장
 	float DepthBias;
+	float SlopeBias = 0.0f;
 	uint32 Resolution = DefaultShadowResolution;
 	float BlendWidth = 0.0f;		// Cascade 경계 Blend Width (UV)
 	uint32 bDebugCascades = 0;		// Cascade Debug 용
@@ -43,8 +45,11 @@ struct alignas(16) FShadowInfo
 
 	float DepthBias;
 	float PrescaledTangentTheta;
+	float SlopeBias;
+	float NearPlane;
+
 	uint32 ArrayIndex = 0;
-	float FShadowInfo_padding;
+	float FShadowInfo_padding[3];
 };
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
