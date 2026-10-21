@@ -733,6 +733,66 @@ std::size_t FMultipleViewportsAdapter::GetVisibleObjectCount(const int32 ViewInd
 	return VisibleIds[ViewIndex].Num();
 }
 
+void FMultipleViewportsAdapter::PrepareViewVisibility(
+    const int32 ViewIndex)
+{
+    assert(ViewIndex >= 0 && ViewIndex < MaxViewCount);
+
+    TArray<ObjectId>& ViewVisibleIds = VisibleIds[ViewIndex];
+    ViewVisibleIds.Reset();
+
+    if (!IsViewActive(ViewIndex))
+    {
+        return;
+    }
+
+    const PreparedView& View = PrepareView(ViewIndex);
+    CullForView(RenderObjects, View.Frustum, ViewVisibleIds);
+}
+
+void FMultipleViewportsAdapter::CollectVisibleShadowReceiverBounds(
+    const int32 ViewIndex,
+    TArray<FAABB>& OutReceiverBounds) const
+{
+    assert(ViewIndex >= 0 && ViewIndex < MaxViewCount);
+    OutReceiverBounds.Reset();
+
+    if (!IsViewActive(ViewIndex))
+    {
+        return;
+    }
+
+    for (const ObjectId Id : VisibleIds[ViewIndex])
+    {
+        const auto* Snapshot = PrimitiveById.Find(Id);
+        if (!Snapshot || !Snapshot->Primitive)
+        {
+            continue;
+        }
+
+        UPrimitiveComponent* Primitive = Snapshot->Primitive;
+        const auto* StaticComponent = Cast<UStaticMeshComponent>(Primitive);
+        const auto* BillboardComponent = Cast<UBillboardComponent>(Primitive);
+        if ((StaticComponent && StaticComponent->IsEditorIcon()) ||
+            (BillboardComponent && BillboardComponent->IsEditorIcon()))
+        {
+            continue;
+        }
+
+        const FPrimitiveSceneProxy* Proxy = Primitive->GetSceneProxy();
+        if (!Proxy || !Proxy->IsReceivingShadows())
+        {
+            continue;
+        }
+
+        const FAABB Bounds = Proxy->GetMesh()
+            ? Proxy->GetBounds()
+            : MakeWorldBounds(Primitive->CalcBounds());
+
+        OutReceiverBounds.Add(Bounds);
+    }
+}
+
 // 가시 ID를 컴포넌트로 역매핑해 큐를 구성한다. 생존 목록·상수는 프레임 공통, Billboard·정렬 거리는 View별이다.
 void FMultipleViewportsAdapter::BuildRenderQueue(const int32 ViewIndex, FRenderQueue& OutQueue, FRenderQueue& OutIconQueue, FRenderQueue& OutArrowQueue)
 {
@@ -743,9 +803,6 @@ void FMultipleViewportsAdapter::BuildRenderQueue(const int32 ViewIndex, FRenderQ
     PendingStaticMeshes.Reset();
     LODInputs.Reset();
     if (!IsViewActive(ViewIndex)) return;
-    {
-        CullForView(RenderObjects, PrepareView(ViewIndex).Frustum, VisibleIds[ViewIndex]);
-    }
     const FRect& Rect = GetViewRect(ViewIndex);
     const FViewCamera& ViewCamera = GetEffectiveCamera(ViewIndex);
     const FMatrix Projection = BuildProjectionMatrix(

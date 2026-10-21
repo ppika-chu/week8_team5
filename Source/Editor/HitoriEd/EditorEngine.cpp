@@ -451,11 +451,20 @@ void UEditorEngine::RenderMultipleViewports()
 			CapturedWorld = ViewWorld;
 		}
 		
+		MultipleViewportsAdapter.PrepareViewVisibility(ViewIndex);
+		TArray<FAABB> ReceiverBounds;
+		MultipleViewportsAdapter.CollectVisibleShadowReceiverBounds(
+			ViewIndex,
+			ReceiverBounds);
+
 		// View 마다 실행 ( Directional Shadow Box 는 View마다 다르기 때문 )
-		ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get(),
-										   MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
-										   MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
-										   ShadowSettings);
+		ViewWorld->GetScene().UpdateLights(
+			Renderer,
+			ShadowRenderer.get(),
+			MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
+			MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
+			ShadowSettings,
+			ReceiverBounds);
 		BeginShadowStatsForView(ViewIndex);
 		RenderShadowPass();
 		RecordShadowViewStats(ViewIndex);
@@ -488,11 +497,19 @@ void UEditorEngine::RenderMultipleViewports()
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
 			CapturedWorld = ViewWorld;
 		}
-		ViewWorld->GetScene().UpdateLights(Renderer,
-										   ShadowRenderer.get(),
-										   MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
-										   MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
-										   ShadowSettings);
+		MultipleViewportsAdapter.PrepareViewVisibility(PIEViewIndex);
+		TArray<FAABB> ReceiverBounds;
+		MultipleViewportsAdapter.CollectVisibleShadowReceiverBounds(
+			PIEViewIndex,
+			ReceiverBounds);
+
+		ViewWorld->GetScene().UpdateLights(
+			Renderer,
+			ShadowRenderer.get(),
+			MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
+			MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
+			ShadowSettings,
+			ReceiverBounds);
 		BeginShadowStatsForView(PIEViewIndex);
 		RenderShadowPass();
 		RecordShadowViewStats(PIEViewIndex);
