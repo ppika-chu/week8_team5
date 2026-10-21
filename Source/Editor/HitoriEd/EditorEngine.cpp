@@ -535,6 +535,14 @@ void UEditorEngine::RenderMultipleViewports()
 
 	ShadowGpuProfiler.EndFrame();
 	ViewportsPanel->SetShadowStats(ViewShadowStats, bShadowViewStatsValid, GetFrameShadowStats(), ShadowGpuProfiler.GetLastCompletedFrame());
+	
+	// stat Light 활성화 상태일 때만
+	if (FStatOverlay::IsEnabled(EStatFlags::Light))
+	{
+		const int32 SelectedView = MultipleViewportsAdapter.GetEditorViewIndex();
+		if (MultipleViewportsAdapter.IsViewActive(SelectedView))
+			ViewportsPanel->SetLightStats(GetWorldForView(SelectedView)->GetScene().GatherLightStats());
+	}
 
 	EMultipleViewportsCameraPreset CameraPresets[4]{};
 	for (int32 ViewIndex = 0; ViewIndex < 4; ++ViewIndex)

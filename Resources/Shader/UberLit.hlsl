@@ -427,7 +427,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
 #endif
 }
 
-// 픽셀을 cascade index로 반환 (debug용)
+// 픽셀을 cascade index로 반환 (Gouruaud debug fallback용)
 uint FindCascadeIndex(float3 WorldPos)
 {
     const FLightShadowRange Range = LightShadowRanges[0];
@@ -441,8 +441,10 @@ uint FindCascadeIndex(float3 WorldPos)
     return Range.Count;
 }
 
-float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
+float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal, float2x2 PoissonRotation, out uint OutCascade, out float OutBlendT)
 {
+    OutCascade = LightShadowRanges[0].Count;        // 모든 cascade 밖
+    OutBlendT = 1.0f;                               // no blend
     if (bReceiveShadows == 0)
     {
         return 1.0f;
@@ -459,19 +461,21 @@ float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPos
 
     // 앞쪽 Cascade부터 검색
     for (uint i = 0; i < Range.Count; ++i)
-    {
+    {   
         const FShadowInfo Info = ShadowInfos[Range.Offset + i];
         float2 UV; float Depth;
 
         // 1) 밖이면 다음 Cascade 검사
         if (!ProjectToShadowMap(WorldPos, Info.LightViewProjection, UV, Depth))
             continue;
+
+        OutCascade = i;
         
         // 그림자면 0 빛이면 1
         const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY, PoissonRotation);
 
-        // 현재 위치에서 가장자리 위치까지 거리
-        const float EdgeDist = min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y));
+        // 현재 위치에서 가장자리 위치까지 거리 uv + depth 구간 확인
+        const float EdgeDist = min(min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y)), min(Depth, 1.0f - Depth));
 
         // 2) 충분히 UV 안쪽이거나 다음 Cascade가 없으면 그대로 반환
         if (EdgeDist >= Range.BlendWidth || i + 1 >= Range.Count)
@@ -483,6 +487,7 @@ float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPos
         if (!ProjectToShadowMap(WorldPos, NextInfo.LightViewProjection, NextUV, NextDepth))
             return Shadow;      // 혹시라도 이 점을 표현하지 않으면 그대로 반환
         
+        OutBlendT = EdgeDist / Range.BlendWidth;
         // lerp(A, B, t) : t가 0 이면 A, 1이면 B
         return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY, PoissonRotation), Shadow, EdgeDist / Range.BlendWidth);
     }
@@ -782,7 +787,7 @@ const bool CanContribute(FLightRenderParameters Light, float3 WorldPos, float3 N
 // Directional + 로컬 라이트의 Diffuse/Specular를 모두 더한다. Ambient는 포함하지 않는다.
 // bUseLightGrid = true면 SvPosition이 속한 셀의 라이트만, false면 전체 로컬 라이트를 순회한다.
 // VS(Gouraud)는 픽셀 위치가 없어 셀을 쓸 수 없으므로 false로 호출한다.
-FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float3 ShadowWorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid)
+FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float3 ShadowWorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid, out uint Cascade, out float BlendT)
 {
 #if SHADOW_POISSON_RANDOM_ROTATION && !LIGHTING_MODEL_GOURAUD && !defined(SHADOW_FILTER_NONE)
     const float2x2 PoissonRotation = CalcPoissonRotation(SvPosition.xy);
@@ -798,9 +803,10 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
     const float3 WorldPosDDX = 0.0f;
     const float3 WorldPosDDY = 0.0f;
 #endif
+
     // Directional Light는 처음에 한 번만 계산
     FLightContribution Total = CalcDirectionalLight(N, V, InShininess);
-    const float DirectionalShadow = CalcDirectionalShadow(ShadowWorldPos, WorldPosDDX, WorldPosDDY, PoissonRotation);
+    const float DirectionalShadow = CalcDirectionalShadow(ShadowWorldPos, WorldPosDDX, WorldPosDDY, PoissonRotation, Cascade, BlendT);
     Total.Diffuse *= DirectionalShadow;
     Total.Specular *= DirectionalShadow;
 
@@ -859,8 +865,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
     Output.Color = Input.Color;
 #if LIGHTING_MODEL_GOURAUD
     const float3 V = normalize(CameraWorldPos - Output.WorldPos);
-    const float3 VertexNormal = normalize(Output.Normal);
-    const FLightContribution Contribution = AccumulateDirectLighting(VertexNormal, V, Output.WorldPos, Output.WorldPos + ShadowNormalOffset * VertexNormal, 1, Output.SvPosition, false);
+    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, normalize(Output.Normal));
     Output.VertexDiffuse = Contribution.Diffuse;
 #endif
     return Output;
@@ -911,30 +916,32 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
     float3 DiffuseLighting = { GetAmbientLighting() };
     float3 SpecularLighting = { 0.0f, 0.0f, 0.0f };
 
+uint Cascade = LightShadowRanges[0].Count;
+float BlendT = 1.0f;
+
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     const float3 V = { normalize(CameraWorldPos - Input.WorldPos) };
-    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, ShadowWorldPos, Shininess, Input.SvPosition, true) };
+    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, ShadowWorldPos, Shininess, Input.SvPosition, true, Cascade, BlendT) };
     DiffuseLighting += Contribution.Diffuse;
     SpecularLighting = Contribution.Specular;
 #elif LIGHTING_MODEL_GOURAUD
     DiffuseLighting += Input.VertexDiffuse;
+    Cascade = FindCascadeIndex(ShadowWorldPos);
 #endif
-
     // Cascade 디버그
     if (bReceiveShadows != 0 &&
         LightShadowRanges[0].bDebugCascades != 0)
     {
         static const float3 CascadeColors[5] = {
-            // 연한 빨강, 연한 초록, 연학 파랑, 연한 노랑, 흰색 (Cascade 없는 곳은 원래 색)
+            // 연한 빨강, 연한 초록, 연 파랑, 연한 노랑, 흰색 (Cascade 없는 곳은 원래 색)
             float3(1.0f, 0.3f, 0.3f), float3(0.3f, 1.0f, 0.3f), float3(0.3f, 0.3f, 1.0f), float3(1.0f, 1.0f, 0.3f), float3(1.0f, 1.0f, 1.0f)
         };
-        // 틴트 추가
-        const uint Index = FindCascadeIndex(ShadowWorldPos);
-        // 모든 Cascade 밖(Index == Count)이면 Cascade 수와 상관없이 흰색
-        const float3 Tint = (Index >= LightShadowRanges[0].Count) ? float3(1.0f, 1.0f, 1.0f) : CascadeColors[Index];
-        Albedo.rgb *= Tint;
-    }
 
+        const uint Count = LightShadowRanges[0].Count;
+        const float3 Cur = Cascade < Count ? CascadeColors[Cascade] : float3(1,1,1);
+        const float3 Next = Cascade + 1 < Count ? CascadeColors[Cascade + 1] : Cur;
+        Albedo.rgb *= lerp(Next, Cur, BlendT);
+    }
     return float4(Albedo.rgb * DiffuseLighting + SpecularLighting, Alpha);
 #endif
 }
