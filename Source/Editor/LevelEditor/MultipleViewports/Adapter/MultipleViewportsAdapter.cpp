@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -902,7 +903,63 @@ void FMultipleViewportsAdapter::BuildRenderQueue(const int32 ViewIndex, FRenderQ
 		PendingStaticMeshes[I]->SubmitToRenderQueue(OutQueue, SelectedLODs[I]);
 }
 
-void FMultipleViewportsAdapter::CollectShadowCasterStates(const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates)
+bool FMultipleViewportsAdapter::TryGetShadowBoundsSizePixels(
+	const FAABB& Bounds, const FMatrix& CameraViewProjection,
+	const FVector2& ViewportSize, float& OutSizePixels)
+{
+	OutSizePixels = 0.0f;
+
+	if (!std::isfinite(ViewportSize.X) || !std::isfinite(ViewportSize.Y) ||
+		ViewportSize.X <= 0.0f || ViewportSize.Y <= 0.0f)
+	{
+		return false;
+	}
+
+	const float MaximumFloat = std::numeric_limits<float>::max();
+	FVector2 MinimumNdc(MaximumFloat, MaximumFloat);
+	FVector2 MaximumNdc(-MaximumFloat, -MaximumFloat);
+
+	for (uint32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+	{
+		const FVector CornerOffset(
+			(CornerIndex & 1u) ? Bounds.Extent.X : -Bounds.Extent.X,
+			(CornerIndex & 2u) ? Bounds.Extent.Y : -Bounds.Extent.Y,
+			(CornerIndex & 4u) ? Bounds.Extent.Z : -Bounds.Extent.Z);
+		const FVector4 ClipPosition = CameraViewProjection.TransformFVector4(
+			FVector4(Bounds.Center + CornerOffset, 1.0f));
+
+		// Near Plane을 가로지르는 Bounds는 크기를 추정하지 않고 유지한다.
+		if (!std::isfinite(ClipPosition.W) || !std::isfinite(ClipPosition.Z) ||
+			ClipPosition.W <= 1.0e-6f || ClipPosition.Z <= 0.0f)
+		{
+			return false;
+		}
+
+		const float NdcX = ClipPosition.X / ClipPosition.W;
+		const float NdcY = ClipPosition.Y / ClipPosition.W;
+
+		if (!std::isfinite(NdcX) || !std::isfinite(NdcY))
+		{
+			return false;
+		}
+
+		MinimumNdc.X = std::min(MinimumNdc.X, NdcX);
+		MinimumNdc.Y = std::min(MinimumNdc.Y, NdcY);
+		MaximumNdc.X = std::max(MaximumNdc.X, NdcX);
+		MaximumNdc.Y = std::max(MaximumNdc.Y, NdcY);
+	}
+
+	const float WidthPixels = (MaximumNdc.X - MinimumNdc.X) * ViewportSize.X * 0.5f;
+	const float HeightPixels = (MaximumNdc.Y - MinimumNdc.Y) * ViewportSize.Y * 0.5f;
+	OutSizePixels = std::max(WidthPixels, HeightPixels);
+
+	return std::isfinite(OutSizePixels);
+}
+
+void FMultipleViewportsAdapter::CollectShadowCasterStates(
+	const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates,
+	const FMatrix& CameraViewProjection, const FVector2& ViewportSize,
+	float MinimumCasterSizePixels)
 {
 	OutCasterStates.Reset();
 
@@ -934,6 +991,19 @@ void FMultipleViewportsAdapter::CollectShadowCasterStates(const FMatrix& LightVi
 		}
 
 		const FPrimitiveSceneProxy* Proxy = StaticComponent->GetSceneProxy();
+
+		if (MinimumCasterSizePixels > 0.0f)
+		{
+			float CasterSizePixels = 0.0f;
+			const bool bSizeCalculated = TryGetShadowBoundsSizePixels(
+				Proxy->GetBounds(), CameraViewProjection, ViewportSize, CasterSizePixels);
+
+			if (bSizeCalculated && CasterSizePixels < MinimumCasterSizePixels)
+			{
+				continue;
+			}
+		}
+
 		const uint64 TransformRevision = Proxy->GetTransformRevision();
 		OutCasterStates.Add(FShadowCasterState{
 			.CasterID = static_cast<uint64>(Id),
