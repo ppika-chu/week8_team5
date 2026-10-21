@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include "Shader.h"
 #include "ViewMode.h"
 
@@ -25,6 +26,7 @@ public:
 	static FComputeShader* GetComputeShader(const FString& InPath);
 	static FShaderProgram* GetShaderProgram(const FString& InPath, const D3D_SHADER_MACRO* Macro = nullptr);
 
+	static std::array<D3D_SHADER_MACRO, 3> MakeUberLitMacros(EViewMode ViewMode, EShadowFilter Filter);
 	// 뷰모드에 맞는 UberLit 변형. 컴파일에 실패했으면 nullptr.
 	static FShaderProgram* GetUberLitProgram(EViewMode Mode);
 	// 머티리얼 셰이더가 UberLit(기본 키 또는 변형)인지. 아니면 뷰모드로 바꾸지 않는다.

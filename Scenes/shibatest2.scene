@@ -467,7 +467,7 @@
                             "Name": "UPointLightComponent",
                             "Parent": "",
                             "Properties": {
-                                "AttenuationRadius": 15.741999626159668,
+                                "AttenuationRadius": 35.641998291015625,
                                 "Intensity": 1.0,
                                 "LightColor": 4294967295,
                                 "LightFalloffExponent": 1.0,
@@ -478,9 +478,9 @@
                                 "SourceRadius": 0.10000000149011612,
                                 "Transform": {
                                     "Location": {
-                                        "X": 2.6009700298309326,
-                                        "Y": -0.9018287658691406,
-                                        "Z": 0.8758716583251953
+                                        "X": 3.180445909500122,
+                                        "Y": -1.6765131950378418,
+                                        "Z": 0.10480952262878418
                                     },
                                     "Rotation": {
                                         "Pitch": 0.0,
@@ -524,6 +524,65 @@
                             "Name": "UBillboardComponent",
                             "Parent": "UPointLightComponent",
                             "Properties": {
+                                "Transform": {
+                                    "Location": {
+                                        "X": 0.0,
+                                        "Y": 0.0,
+                                        "Z": 0.0
+                                    },
+                                    "Rotation": {
+                                        "Pitch": 0.0,
+                                        "Roll": 0.0,
+                                        "Yaw": 0.0
+                                    },
+                                    "Scale": {
+                                        "X": 1.0,
+                                        "Y": 1.0,
+                                        "Z": 1.0
+                                    }
+                                },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
+                                "bVisible": true
+                            }
+                        }
+                    ],
+                    "Properties": {}
+                },
+                {
+                    "Class": "AStaticMeshActor",
+                    "Components": [
+                        {
+                            "Class": "USceneComponent",
+                            "Name": "DefaultSceneRoot",
+                            "Parent": "",
+                            "Properties": {
+                                "Transform": {
+                                    "Location": {
+                                        "X": 0.0,
+                                        "Y": 17.90498161315918,
+                                        "Z": 0.0
+                                    },
+                                    "Rotation": {
+                                        "Pitch": 0.0,
+                                        "Roll": 0.0,
+                                        "Yaw": 0.0
+                                    },
+                                    "Scale": {
+                                        "X": 100.0,
+                                        "Y": 1.0,
+                                        "Z": 100.0
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Class": "UStaticMeshComponent",
+                            "Name": "UStaticMeshComponent",
+                            "OverrideMaterials": [],
+                            "Parent": "DefaultSceneRoot",
+                            "Properties": {
+                                "StaticMesh": "Cube",
                                 "Transform": {
                                     "Location": {
                                         "X": 0.0,
