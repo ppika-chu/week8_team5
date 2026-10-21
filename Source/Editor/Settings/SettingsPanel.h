@@ -5,6 +5,8 @@
 #include "Math/Quat.h"
 #include "Math/Vector.h"
 class FMultipleViewportsAdapter;
+class FShadowRenderer;
+class FImGuiRenderer;
 
 class UWorld;
 
@@ -72,6 +74,8 @@ public:
 	const char* GetPanelName() const override { return "Settings"; }
 
 	void SetWorld(UWorld* InWorld) { World = InWorld; }
+	void SetShadowRenderer(FShadowRenderer& In) { ShadowRenderer = &In; }
+	void SetImGuiRenderer(FImGuiRenderer& In) { ImGuiRenderer = &In; }
 
 	const FEditorSettings& GetSettings() const { return Settings; }
 	// 실행 중 레이아웃 변경을 editor.ini 저장 대상과 동일한 설정 객체에 반영한다.
@@ -92,7 +96,13 @@ private:
     // View별 Transform·투영·표시 설정을 읽어 저장용 스냅샷에 반영한다.
     void ReadViewportSettings(FEditorSettings& Out) const;
     void ApplyViewportSettings();
+	void DrawShadowAtlas();
+	int32 ShadowAtlasLayerIndex = 0;
+
     FMultipleViewportsAdapter* ViewportAdapter = nullptr;
 	UWorld* World;
 	FEditorSettings Settings;
+
+	FShadowRenderer* ShadowRenderer = nullptr;
+	FImGuiRenderer* ImGuiRenderer = nullptr;
 };

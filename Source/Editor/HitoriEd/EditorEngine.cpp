@@ -133,6 +133,8 @@ bool UEditorEngine::Init()
 	OutlineRenderer->Init(Renderer);
 
 	SettingsPanel = EditorUI->AddEditorPanel<FSettingsPanel>();
+	SettingsPanel->SetShadowRenderer(*ShadowRenderer);
+	SettingsPanel->SetImGuiRenderer(*ImGuiRenderer);
 
 	//ToolbarPanel->SetPlayCallback([this]() { RequestPlaySession(); });
 	//ToolbarPanel->SetStopCallback([this]() { RequestEndPlayMap(); });

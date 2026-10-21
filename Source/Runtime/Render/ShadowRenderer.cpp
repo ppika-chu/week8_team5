@@ -689,3 +689,18 @@ TArray<FShadowInfo> FShadowRenderer::GetShadowInfosByLightUUID(uint32 LightID) c
 
 	return Result;
 }
+
+uint64 FShadowRenderer::GetShadowAtlasAllocatedTexelCount() const
+{
+	uint64 AllocatedTexelCount = 0;
+
+	for (const auto& Entry : ShadowCache)
+	{
+		const FShadowAtlasAllocation& Allocation = Entry.second.Allocation;
+
+		AllocatedTexelCount +=
+			static_cast<uint64>(Allocation.Width) * Allocation.Height;
+	}
+
+	return AllocatedTexelCount;
+}
