@@ -51,6 +51,7 @@ struct FEditorSettings
 
 	// 0: Low, 1: Medium, 2: High, 3: Ultra
 	int32 ShadowResolutionQuality = 3;
+	int32 ShadowFilter = 3;	// EShadowFilter: 0 None, 1 PCF 3x3, 2 PCF 5x5, 3 PCSS
 
 	// Shadow (CSM)
 	int32 NumCascades = 3;				// 1 ~ Max (4) 사이값    *Max 값은 ShadowCascade.h 에 정의해둠.

@@ -53,7 +53,7 @@ FShadowData FitCascade(const FVector Corners[8], const FVector& F, const FVector
 	Center += R * (std::floor(CX / Texel) * Texel - CX);
 	Center += U * (std::floor(CY / Texel) * Texel - CY);
 
-    constexpr float ShadowNearDistance = 5000.0f;
+    constexpr float ShadowNearDistance = 50.0f;
 
 	const float TNear = -FMath::Max( Radius, ShadowNearDistance );
 	const float TFar = FMath::Max( Radius, ShadowNearDistance );

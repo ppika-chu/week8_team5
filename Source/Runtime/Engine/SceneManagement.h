@@ -23,7 +23,7 @@ struct FLightRenderParameters
 	float BarnDoorCos;
 	float BarnDoorSin;
 	float BarnDoorLength;
-	float Padding;
+	float SourceRadius;
 };
 
 static_assert(sizeof(FLightRenderParameters) == 96,"sizeof(UberLit / TileBasedLightCulling) == sizeof(FLightRenderParameters)");
