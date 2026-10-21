@@ -10,6 +10,8 @@ struct FShadowAtlasAllocation
 	uint32 Y = 0;
 	uint32 Width = 0;
 	uint32 Height = 0;
+
+	uint32 ArrayIndex = 0;
 };
 
 class FShadowAtlas
@@ -22,6 +24,12 @@ private:
 		uint32 NextX = 0;	// The next X coordinate to place a tile in the shelf
 	};
 
+	struct FLayerPackingState
+	{
+		TArray<FShelf> Shelves;
+		uint32 UsedHeight = 0;
+	};
+
 public:
 	//bool Init(uint32 InAtlasSize);
 
@@ -32,18 +40,31 @@ public:
 	static bool TryPack(
 		const TArray<uint32>& Resolutions,
 		uint32 CandidateSize,
-		TArray<FShadowAtlasAllocation>* OutAllocations
-	);
+		uint32 MaxLayers,
+		TArray<FShadowAtlasAllocation>* OutAllocations,
+		uint32* OutRequiredLayers);
 
-	bool EnsureTextureSize(uint32 RequiredSize);
+	bool EnsureTextureSize(
+		uint32 RequiredSize,
+		uint32 RequiredLayers = 1);
 
 	FTexture2D* GetTexture() const { return Texture.get(); }
 	uint32 GetSize() const { return AtlasSize; }
+	uint32 GetLayerCount() const { return LayerCount; }
+
+private:
+	static bool TryPlaceInLayer(
+		uint32 CandidateSize,
+		FLayerPackingState& Layer,
+		uint32 Resolution,
+		uint32 ArrayIndex,
+		FShadowAtlasAllocation* OutAllocation);
 
 private:
 	TUniquePtr<FTexture2D> Texture{};
 
 	uint32 AtlasSize = 0;
+	uint32 LayerCount = 0;
 	//uint32 UsedHeight = 0;	// Total height used by shelves
 	//TArray<FShelf> Shelves{};
 

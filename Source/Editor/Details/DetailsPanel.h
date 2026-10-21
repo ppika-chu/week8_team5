@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 
 struct FTransform;
+class FImGuiRenderer;
 
 using DetailsSelectionCallback = std::function<void(UActorComponent*)>;
 using DetailsDeleteComponentCallback = std::function<void(UActorComponent*)>;
@@ -18,6 +19,7 @@ public:
 
 	bool Init() override;
 	void SetShadowRenderer(FShadowRenderer& InShadowRenderer) { ShadowRenderer = &InShadowRenderer; }
+	void SetImGuiRenderer(FImGuiRenderer& InImGuiRenderer) { ImGuiRenderer = &InImGuiRenderer; }
 	void Tick(float DeltaTime) override;
 	void OnRender() override;
 
@@ -63,5 +65,6 @@ private:
 
 	// For shadow map preview
 	FShadowRenderer* ShadowRenderer = nullptr;
+	FImGuiRenderer* ImGuiRenderer = nullptr;
 };
 
