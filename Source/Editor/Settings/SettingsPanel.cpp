@@ -133,6 +133,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
 	File << "ShadowResolutionQuality=" << Settings.ShadowResolutionQuality << "\n";
+	File << "ShadowDistance=" << Settings.ShadowDistance << "\n";
 	File << "ShadowFilter=" << Settings.ShadowFilter << "\n";
 	File << "\n";
 
@@ -265,7 +266,7 @@ bool FSettingsPanel::LoadSettings()
 						Settings.ShadowResolutionQuality = ShadowQualityIndex;
 					}
 				}
-
+				else if (Key == "ShadowDistance") Settings.ShadowDistance = std::stof(ValueStr);
 				else if (Key == "ShadowFilter")
 				{
 					std::istringstream Number(ValueStr);

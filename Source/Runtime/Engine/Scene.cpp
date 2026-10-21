@@ -197,6 +197,9 @@ void FScene::RemoveAllLights()
 void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, const FShadowSettings& Shadow)
 {
 	if (!Renderer || !ShadowRenderer) return;
+
+	// Lights 개수 배열 초기화
+	std::fill(std::begin(ShadowBuiltCount), std::end(ShadowBuiltCount), 0u);
 	
 	FLightingConstants Constants{};
 	Constants.Ambient.Color = FVector(1, 1, 1);
@@ -298,6 +301,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 				Directional.Maps.Add(ShadowData);
 			}
 			Lights.Add(Directional);
+			++ShadowBuiltCount[static_cast<uint32>(ELightType::Directional)];
 		}
 	}
 
@@ -377,6 +381,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		if (Local.Maps.Num() > 0)
 		{
 			Lights.Add(Local);
+			++ShadowBuiltCount[static_cast<uint32>(LightComponent->GetLightType())];
 		}
 	}
 
@@ -529,4 +534,26 @@ void FScene::MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy)
 	if (!Proxy || Proxy->bRenderStateQueued) return;
 	Proxy->bRenderStateQueued = true;
 	RenderStateDirtyProxies.Add(Proxy);
+}
+
+FLightStats FScene::GatherLightStats() const
+{
+	FLightStats S{};
+	auto Add = [&S] (const ULightComponent* C)
+	{
+		const uint32 T = static_cast<uint32>(C->GetLightType());
+		++S.Count[T];
+		++S.Total;
+		
+	};
+	for (const FDirectionalLightSceneProxy* P : DirectionalLightProxies) Add(P->GetLightComponent());
+	for (const FLocalLightSceneProxy* P : LocalLightProxies) Add(P->GetLightComponent());
+	for (uint32 T = 0; T < 6; ++T)
+	{
+		S.ShadowCasting[T] = ShadowBuiltCount[T];
+		S.TotalShadowCasting += S.ShadowCasting[T];
+	}
+	S.Count[static_cast<uint32>(ELightType::Sky)] = SkyLights.Num();
+	S.Total += SkyLights.Num();
+	return S;
 }

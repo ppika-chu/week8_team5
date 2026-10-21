@@ -11,6 +11,7 @@
 #include <format>
 
 #include "Core/Stats/EditorStats.h"
+#include "Runtime/Components/LightComponentBase.h"
 
 namespace
 {
@@ -348,8 +349,7 @@ void FViewportsPanel::OnRender()
 		// Reset Stats
 		if (ViewportAdapter && ViewIndex == ViewportAdapter->GetEditorViewIndex() &&
 			FStatOverlay::IsAnyEnabled() &&
-			(FStatOverlay::IsEnabled(EStatFlags::Profile) ||
-				FStatRegistry::Find(EditorStats::STAT_PickingTime)))
+			(FStatOverlay::IsEnabled(EStatFlags::Profile)))
 		{
 			PlaceToolbarItem(SmallButtonWidth("Reset Stats"));
 			if (ImGui::SmallButton("Reset Stats"))
@@ -452,6 +452,17 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		}
 	}
 
+	if (FStatOverlay::IsEnabled(EStatFlags::Light))
+	{
+		auto Idx = [](ELightType T) { return static_cast<uint32>(T); };
+
+		Lines.Add({"Light", TitleColor});
+		Lines.Add({std::format("  Total {} | Shadowed {}", LightStats.Total, LightStats.TotalShadowCasting), ValueColor});
+		Lines.Add({std::format("  Directional {} | Shadowed {}", LightStats.Count[Idx(ELightType::Directional)], LightStats.ShadowCasting[Idx(ELightType::Directional)]), ValueColor});
+		Lines.Add({std::format("  Point {} | Shadowed {}", LightStats.Count[Idx(ELightType::Point)], LightStats.ShadowCasting[Idx(ELightType::Point)]), ValueColor});
+		Lines.Add({std::format("  Spot {} | Shadowed {}", LightStats.Count[Idx(ELightType::Spot)], LightStats.ShadowCasting[Idx(ELightType::Spot)]), ValueColor});
+	}
+
 	struct FProfileStatLine
 	{
 		FString Text;
@@ -476,7 +487,8 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		}
 	}
 
-	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
+	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime);
+    	FStatOverlay::IsEnabled(EStatFlags::Profile) && PickingData)
 	{
 		ProfileLines.Add({ "Picking", TitleColor });
 		FProfileStatLine Line{"  Time (ms)", ValueColor};

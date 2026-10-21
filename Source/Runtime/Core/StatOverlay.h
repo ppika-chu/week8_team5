@@ -11,6 +11,7 @@ enum class EStatFlags : uint32
 	Memory  = 1 << 1,
 	Profile = 1 << 2,
 	Shadow  = 1 << 3,
+	Light 	= 1 << 4,
 };
 DEFINE_ENUM_OPERATORS(EStatFlags)
 

@@ -4,6 +4,7 @@
 #include "Editor/LevelEditor/MultipleViewports/Adapter/MultipleViewportsAdapterTypes.h"
 #include "Render/RenderingInfo.h"
 #include "Core/Stats/ShadowStats.h"
+#include "Core/Stats/LightStats.h"
 class FMultipleViewportsAdapter;
 
 class FViewportsPanel : public IEditorPanel
@@ -27,6 +28,7 @@ public:
 	// HDR 결과를 임시로 받는 View별 텍스처. ColorTarget과 크기는 같고 포맷은 float.
 	FTexture2D* GetHDRTarget(int32 ViewIndex) const;
 	void SetShadowStats(const FShadowRenderStats* ViewStats, const bool* ValidViews, const FShadowFrameStats& FrameStats, const FShadowGpuFrameStats& GpuStats);
+	void SetLightStats(FLightStats Stats) { LightStats = Stats; }
 
 	FVector2 GetContentSize() const { return {ContentSize.x, ContentSize.y}; }
 	FVector2 GetLocalMousePosition() const;
@@ -44,6 +46,7 @@ public:
 private:
 	FMultipleViewportsAdapter* ViewportAdapter = nullptr;
 	FShadowRenderStats ShadowViewStats[MaxShadowStatsViewCount]{};
+	FLightStats LightStats{};
 	bool bShadowViewStatsValid[MaxShadowStatsViewCount]{};
 	FShadowFrameStats ShadowFrameStats{};
 	FShadowGpuFrameStats ShadowGpuFrameStats{};
