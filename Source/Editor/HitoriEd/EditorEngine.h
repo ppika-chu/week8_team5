@@ -123,7 +123,7 @@ private:
 	//Icon Pass
 	void RenderIconPass(int32 ViewIndex, UWorld& ViewWorld, const FRenderingInfo& ViewRenderingInfo, const FMatrix& ViewProjection, const FVector& ViewCameraLocation, const FVector& ViewCameraForward, FRenderQueue& RenderIconQueue, FRenderQueue& ArrowQueue);
 	//Shadow Pass
-	void RenderShadowPass();	// 전체 light render pass
+	void RenderShadowPass(int32 ViewIndex, const FViewportSettings& Viewport);
 	void BeginShadowStatsForView(int32 ViewIndex);
 	void RecordShadowViewStats(int32 ViewIndex);
 
