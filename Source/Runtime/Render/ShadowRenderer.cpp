@@ -368,6 +368,7 @@ void FShadowRenderer::SetParameters(
 
 	CurrentViewStats.AllocatedMapCount = static_cast<uint32>(ShadowInfos.Num());
 	CurrentViewStats.AtlasSize = ShadowAtlas.GetSize();
+	CurrentViewStats.AtlasLayerCount = ShadowAtlas.GetLayerCount();
 	for (const auto& [Key, Cache] : ShadowCache)
 	{
 		const FShadowAtlasAllocation& Allocation = Cache.Allocation;

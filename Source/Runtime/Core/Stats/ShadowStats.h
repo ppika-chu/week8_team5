@@ -13,6 +13,7 @@ struct FShadowRenderStats
 	uint32 UpdatedMapCount = 0;
 	uint64 DrawCallCount = 0;
 	uint32 AtlasSize = 0;
+	uint32 AtlasLayerCount = 0;
 	uint64 AllocatedTexelCount = 0;
 };
 
