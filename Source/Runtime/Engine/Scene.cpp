@@ -13,6 +13,8 @@
 
 namespace
 {
+	constexpr uint32 LocalShadowPaddingPixels = 41;
+
 	uint32 CalculateShadowResolution(uint32 BaseResolution, float ResolutionScale)
 	{
 		if (!std::isfinite(ResolutionScale) || ResolutionScale <= 0.0f)
@@ -28,7 +30,7 @@ namespace
 	float GetPaddedShadowFov(
 		float OriginalFovDegrees,
 		uint32 Resolution,
-		uint32 PaddingPixels = 4)
+		uint32 PaddingPixels = LocalShadowPaddingPixels)
 	{
 		assert(Resolution > 2 * PaddingPixels);
 
@@ -309,17 +311,19 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		const ULightComponent* LightComponent = LightProxy->GetLightComponent();
 		const float NearZ = 0.1f;
 		const float FarZ = LightParameter.Radius;
-		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
+		uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
 
 		if (!LightProxy->IsVisible() || !LightComponent->IsCastingShadows() || FarZ <= NearZ || Resolution == 0)
 		{
 			continue;
 		}
 
+		Resolution = FMath::Max(Resolution, 2 * LocalShadowPaddingPixels + 1);
 		FLightShadowData Local{};
 		Local.LightID = LightComponent->GetUUID();
 		Local.LightSlotIndex = MaxDirectionalLights + LightProxy->PackedIndex;
 		Local.DepthBias = LightComponent->GetShadowBias();
+		Local.SlopeBias = LightComponent->GetShadowSlopeBias();
 		Local.Resolution = Resolution;
 
 		// 맵별 LightViewProj 비교로 갱신하므로 매번 Revision을 늘리지 않는다.
@@ -342,6 +346,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 
 			FShadowData ShadowData{};
 			ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(LightTransform.GetForward(), LightTransform.GetUp(), ShadowFov, NearZ, FarZ);
+			ShadowData.NearPlane = NearZ;
 			ShadowData.Revision = LightProxy->GetShadowRevision();
 
 			Local.Maps.Add(ShadowData);
@@ -356,6 +361,7 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 			{
 				FShadowData ShadowData{};
 				ShadowData.LightViewProj = LightProxy->GetShadowViewProjection(Face.Direction, Face.Up, ShadowFov, NearZ, FarZ);
+				ShadowData.NearPlane = NearZ;
 				ShadowData.Revision = LightProxy->GetShadowRevision();
 
 				Local.Maps.Add(ShadowData);

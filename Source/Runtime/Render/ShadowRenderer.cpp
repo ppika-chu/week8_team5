@@ -48,7 +48,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	if (!RenderCommand::SupportsClearView())
 	{
-		// ClearView Áö¿øÇÏÁö ¾ÊÀ¸¸é ShadowRenderer¸¦ »ç¿ëÇÒ ¼ö ¾ø´Ù.
+		// ClearView ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ShadowRendererï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
 		return false;
 	}
 
@@ -319,6 +319,7 @@ void FShadowRenderer::SetParameters(
 				.DepthBias = Light.DepthBias,
 				.PrescaledTangentTheta = Data.Width > 0.0f ? DirectionalLightSourceTangentTheta * Data.Depth / Data.Width : 0.0f,
 				.SlopeBias = Light.SlopeBias,
+				.NearPlane = Data.NearPlane,
 				});
 
 			ShadowFrameEntries.Add(FShadowFrameEntry{
@@ -401,7 +402,7 @@ void FShadowRenderer::BeginShadowPass()
 		},
 		.DepthStencil = {
 			.Texture = ShadowAtlas.GetTexture(),
-			.LoadOp = ERenderTargetLoadOp::Load, // LoadOpÀ» Load·Î ¼³Á¤ÇÏ¿© ±âÁ¸ ³»¿ëÀ» À¯Áö
+			.LoadOp = ERenderTargetLoadOp::Load, // LoadOpï¿½ï¿½ Loadï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 		}
 	};
 

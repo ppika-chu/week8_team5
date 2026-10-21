@@ -14,6 +14,7 @@ struct FShadowData
 	FMatrix LightViewProj;
 	float Depth = 0.0f;
 	float Width = 0.0f;
+	float NearPlane = 0.0f;
 
 	uint64 Revision = 0;
 };
@@ -45,7 +46,7 @@ struct alignas(16) FShadowInfo
 	float DepthBias;
 	float PrescaledTangentTheta;
 	float SlopeBias;
-	float FShadowInfo_padding;
+	float NearPlane;
 };
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
