@@ -445,10 +445,17 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		if (ViewIndex >= 0 && ViewIndex < MaxShadowStatsViewCount && bShadowViewStatsValid[ViewIndex])
 		{
 			const FShadowRenderStats& Stats = ShadowViewStats[ViewIndex];
-			const double AtlasArea = static_cast<double>(Stats.AtlasSize) * Stats.AtlasSize;
-			const double UsagePercent = AtlasArea > 0.0 ? 100.0 * static_cast<double>(Stats.AllocatedTexelCount) / AtlasArea : 0.0;
+			//const double AtlasArea = static_cast<double>(Stats.AtlasSize) * Stats.AtlasSize;
+			const double ATlasCapacity =
+				static_cast<double>(Stats.AtlasSize) *
+				Stats.AtlasSize *
+				Stats.AtlasLayerCount;
+
+			const double UsagePercent = ATlasCapacity > 0.0 
+				? 100.0 * static_cast<double>(Stats.AllocatedTexelCount) / ATlasCapacity 
+				: 0.0;
 			Lines.Add({std::format("  View {}: CPU {:.3f} ms | Draws {}", ViewIndex, Stats.CpuTimeMs, Stats.DrawCallCount), ValueColor});
-			Lines.Add({std::format("  Atlas {}x{} | tiles {:.1f}%", Stats.AtlasSize, Stats.AtlasSize, UsagePercent), ValueColor});
+			Lines.Add({std::format("  Atlas {}x{} | Layers {} | tiles {:.1f}%", Stats.AtlasSize, Stats.AtlasSize, Stats.AtlasLayerCount, UsagePercent), ValueColor});
 		}
 	}
 

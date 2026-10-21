@@ -40,7 +40,13 @@ public:
 	void RemoveLight(ULightComponent* Component);
 
 	void RemoveAllLights();
-	void UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, const FShadowSettings& Shadow);
+	void UpdateLights(
+		FRenderer* Renderer,
+		FShadowRenderer* ShadowRenderer,
+		const FMatrix& CameraViewProj,
+		const FMatrix& CameraProj,
+		const FShadowSettings& Shadow,
+		const TArray<FAABB>& ReceiverBounds);
 
 	void AddFogInfo(uint32 Id, const FFogInfo& FogInfo);
 	void RemoveFogInfo(uint32 Id);

@@ -123,6 +123,7 @@ bool UEditorEngine::Init()
 	// 필요한 Panel들 추가후 raw pointer 반환(소유권 = EditorUI)
 	DetailsPanel = EditorUI->AddEditorPanel<FDetailsPanel>();
 	DetailsPanel->SetShadowRenderer(*ShadowRenderer);
+	DetailsPanel->SetImGuiRenderer(*ImGuiRenderer);
 	EditorControlsPanel = EditorUI->AddEditorPanel<FEditorControlsPanel>();
 	ViewportsPanel = EditorUI->AddEditorPanel<FViewportsPanel>();
 	ContentDrawerPanel = EditorUI->AddEditorPanel<FContentDrawerPanel>();
@@ -452,12 +453,20 @@ void UEditorEngine::RenderMultipleViewports()
 			CapturedWorld = ViewWorld;
 		}
 		
+		MultipleViewportsAdapter.PrepareViewVisibility(ViewIndex);
+		TArray<FAABB> ReceiverBounds;
+		MultipleViewportsAdapter.CollectVisibleShadowReceiverBounds(
+			ViewIndex,
+			ReceiverBounds);
+
 		// View 마다 실행 ( Directional Shadow Box 는 View마다 다르기 때문 )
-		ViewWorld->GetScene().UpdateLights(Renderer, ShadowRenderer.get(),
-										   MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
-										   MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
-										   ShadowSettings);
-		
+		ViewWorld->GetScene().UpdateLights(
+			Renderer,
+			ShadowRenderer.get(),
+			MultipleViewportsAdapter.GetEngineViewProjection(ViewIndex),
+			MultipleViewportsAdapter.GetEngineProjection(ViewIndex),
+			ShadowSettings,
+			ReceiverBounds);
 		BeginShadowStatsForView(ViewIndex);
 		RenderShadowPass();
 		RecordShadowViewStats(ViewIndex);
@@ -490,11 +499,19 @@ void UEditorEngine::RenderMultipleViewports()
 			//ViewWorld->GetScene().UpdateFireBallLight(Renderer);
 			CapturedWorld = ViewWorld;
 		}
-		ViewWorld->GetScene().UpdateLights(Renderer,
-										   ShadowRenderer.get(),
-										   MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
-										   MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
-										   ShadowSettings);
+		MultipleViewportsAdapter.PrepareViewVisibility(PIEViewIndex);
+		TArray<FAABB> ReceiverBounds;
+		MultipleViewportsAdapter.CollectVisibleShadowReceiverBounds(
+			PIEViewIndex,
+			ReceiverBounds);
+
+		ViewWorld->GetScene().UpdateLights(
+			Renderer,
+			ShadowRenderer.get(),
+			MultipleViewportsAdapter.GetEngineViewProjection(PIEViewIndex),
+			MultipleViewportsAdapter.GetEngineProjection(PIEViewIndex),
+			ShadowSettings,
+			ReceiverBounds);
 		BeginShadowStatsForView(PIEViewIndex);
 		RenderShadowPass();
 		RecordShadowViewStats(PIEViewIndex);
@@ -985,7 +1002,11 @@ void UEditorEngine::RecordShadowViewStats(int32 ViewIndex)
 
 void UEditorEngine::RenderShadowPass()
 {
-	if (!SettingsPanel->GetSettings().bDrawPrimitives) return;
+	if (!SettingsPanel->GetSettings().bDrawPrimitives)
+	{
+		ShadowRenderer->UploadShadowInfos();
+		return;
+	}
 
 	const TArray<FShadowInfo>& ShadowInfos = ShadowRenderer->GetShadowInfos();
 	TArray<FShadowCasterState> CasterStates;
@@ -999,23 +1020,23 @@ void UEditorEngine::RenderShadowPass()
 	}
 
 	const TArray<uint32>& ShadowDirtyIndices = ShadowRenderer->GetDirtyShadowIndices();
-	if (ShadowDirtyIndices.Num() == 0)
+	if (ShadowDirtyIndices.Num() > 0)
 	{
-		return;
+		ShadowRenderer->BeginShadowPass();
+
+		for (uint32 DirtyIndex : ShadowDirtyIndices)
+		{
+			const auto& MapCasterStates =
+				ShadowRenderer->GetRequestedCasterStates(DirtyIndex);
+
+			MultipleViewportsAdapter.BuildShadowQueue(MapCasterStates, ShadowQueue);
+			ShadowRenderer->OnRender(ShadowQueue, DirtyIndex);
+		}
+		ShadowRenderer->EndShadowPass();
 	}
 
-	ShadowRenderer->BeginShadowPass();
-
-	//for (const FShadowInfo& ShadowInfo : ShadowInfos)
-	//for (uint32 i = 0; i < static_cast<uint32>(ShadowInfos.Num()); ++i)
-	for (uint32 DirtyIndex : ShadowDirtyIndices)
-	{
-		MultipleViewportsAdapter.BuildShadowQueue(
-			ShadowInfos[DirtyIndex].LightViewProj, ShadowQueue);
-
-		ShadowRenderer->OnRender(ShadowQueue, DirtyIndex);
-	}
-	ShadowRenderer->EndShadowPass();
+	// 재사용과 빈 맵 판정도 반영해야 하므로 Dirty 맵이 없어도 업로드한다.
+	ShadowRenderer->UploadShadowInfos();
 }
 
 // 입력 View의 Ray와 피킹으로 Gizmo·공유 선택을 갱신한다.

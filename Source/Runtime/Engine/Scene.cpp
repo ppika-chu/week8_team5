@@ -11,6 +11,24 @@
 
 #include <cmath>
 
+static bool IntersectsSphereAABB(
+	const FVector& SphereCenter,
+	float SphereRadius,
+	const FAABB& Bounds)
+{
+	const FVector BoxMin = Bounds.Center - Bounds.Extent;
+	const FVector BoxMax = Bounds.Center + Bounds.Extent;
+
+	const FVector ClosestPoint(
+		FMath::Clamp(SphereCenter.X, BoxMin.X, BoxMax.X),
+		FMath::Clamp(SphereCenter.Y, BoxMin.Y, BoxMax.Y),
+		FMath::Clamp(SphereCenter.Z, BoxMin.Z, BoxMax.Z));
+
+	const FVector Offset = SphereCenter - ClosestPoint;
+
+	return Offset.SizeSquared() <= SphereRadius * SphereRadius;
+}
+
 namespace
 {
 	constexpr uint32 LocalShadowPaddingPixels = 41;
@@ -194,7 +212,13 @@ void FScene::RemoveAllLights()
 }
 
 // 등록된 라이트를 셰이더용 상수로 모아 Renderer에 올린다. 컴포넌트 값을 매 프레임 직접 읽으므로 별도 갱신 경로가 필요 없다.
-void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, const FMatrix& CameraViewProj, const FMatrix& CameraProj, const FShadowSettings& Shadow)
+void FScene::UpdateLights(
+	FRenderer* Renderer,
+	FShadowRenderer* ShadowRenderer,
+	const FMatrix& CameraViewProj,
+	const FMatrix& CameraProj,
+	const FShadowSettings& Shadow,
+	const TArray<FAABB>& ReceiverBounds)
 {
 	if (!Renderer || !ShadowRenderer) return;
 
@@ -228,7 +252,11 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		const float Radius = (Bounds.Max - Bounds.Min).Length() * 0.5f;
 		const ULightComponent* LightComponent = Proxy->GetLightComponent();
 		const uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
-		if (Radius > 0.0f && LightComponent->IsCastingShadows() && Resolution > 0)
+		const bool bHasReceiver = ReceiverBounds.Num() > 0;
+		if (Radius > 0.0f &&
+			LightComponent->IsCastingShadows() &&
+			Resolution > 0 &&
+			bHasReceiver)
 		{
 			FVector Forward, Right, Up;
 			Proxy->GetShadowBasis(Forward,Right, Up);
@@ -305,6 +333,8 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		}
 	}
 
+	const FFrustumPlanes CameraFrustum = ExtractFrustumPlanes(CameraViewProj);
+
 	for (FLocalLightSceneProxy* LightProxy : LocalLightProxies)
 	{
 		FLightRenderParameters& LightParameter = LocalLightParameters[LightProxy->PackedIndex];
@@ -318,6 +348,31 @@ void FScene::UpdateLights(FRenderer* Renderer, FShadowRenderer* ShadowRenderer, 
 		uint32 Resolution = CalculateShadowResolution(Shadow.BaseResolution, LightComponent->GetShadowResolutionScale());
 
 		if (!LightProxy->IsVisible() || !LightComponent->IsCastingShadows() || FarZ <= NearZ || Resolution == 0)
+		{
+			continue;
+		}
+
+		// 영향 구를 완전히 감싸는 AABB. Extent는 각 축의 절반 크기다.
+		const FAABB LightBounds{ LightParameter.Position, FVector(FarZ, FarZ, FarZ) };
+		if (!IsAABBInFrustum(LightBounds, CameraFrustum))
+		{
+			continue;
+		}
+
+		bool bHasReceiver = false;
+		for (const FAABB& Bounds : ReceiverBounds)
+		{
+			if (IntersectsSphereAABB(
+				LightParameter.Position,
+				FarZ,
+				Bounds))
+			{
+				bHasReceiver = true;
+				break;
+			}
+		}
+
+		if (!bHasReceiver)
 		{
 			continue;
 		}
