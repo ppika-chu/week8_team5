@@ -441,7 +441,7 @@ uint FindCascadeIndex(float3 WorldPos)
     return Range.Count;
 }
 
-float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal, float2x2 PoissonRotation, out uint OutCascade, out float OutBlendT)
+float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation, out uint OutCascade, out float OutBlendT)
 {
     OutCascade = LightShadowRanges[0].Count;        // 모든 cascade 밖
     OutBlendT = 1.0f;                               // no blend
@@ -865,7 +865,14 @@ VS_OUTPUT mainVS(VS_INPUT Input)
     Output.Color = Input.Color;
 #if LIGHTING_MODEL_GOURAUD
     const float3 V = normalize(CameraWorldPos - Output.WorldPos);
-    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, normalize(Output.Normal));
+    const float3 VertexN = normalize(Output.Normal);
+    const float3 ShadowWorldPos = Output.WorldPos + ShadowNormalOffset * VertexN;
+    
+    uint DummyCascade; float DummyBlendT;
+    const FLightContribution Contribution = AccumulateDirectLighting(
+        VertexN, V, Output.WorldPos, ShadowWorldPos, 1, Output.SvPosition, false,
+        DummyCascade, DummyBlendT);
+    
     Output.VertexDiffuse = Contribution.Diffuse;
 #endif
     return Output;
