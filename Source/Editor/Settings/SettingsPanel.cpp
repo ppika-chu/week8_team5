@@ -4,6 +4,9 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 
+#include "Editor/EditorUI/ImGUiRenderer.h"
+#include "Render/ShadowRenderer.h"
+
 #include "Engine/World.h"
 
 // 종료 시 렌더·에디터·뷰포트 설정을 함께 저장한다.
@@ -57,6 +60,8 @@ void FSettingsPanel::OnRender()
 	ImGui::SliderFloat("Cascade Split", &Settings.CascadeSplitLambda, 0.0f, 1.0f, "%.2f");
 	ImGui::SliderFloat("Cascade Blend", &Settings.CascadeBlendWidth, 0.0f, 0.3f, "%.2f");
 	ImGui::Checkbox ("Debug Cascades", &Settings.bDebugCascades);
+	ImGui::Spacing();
+	DrawShadowAtlas();
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
@@ -361,4 +366,96 @@ void FSettingsPanel::ApplyViewportSettings()
         ViewportAdapter->ApplyCameraProperties(Index, Camera, false);
         ViewportAdapter->SetViewWireframe(Index, Settings.ViewWireframe[Index] < 0 ? Settings.bWireframe : Settings.ViewWireframe[Index] == 1);
     }
+}
+
+void FSettingsPanel::DrawShadowAtlas()
+{
+	// DefaultOpen 플래그를 주지 않아 처음에는 접힌 상태로 표시한다.
+	if (!ImGui::CollapsingHeader("Shadow Atlas"))
+	{
+		return;
+	}
+
+	if (!ShadowRenderer || !ImGuiRenderer)
+	{
+		ImGui::TextDisabled("Shadow atlas preview is not available.");
+		return;
+	}
+
+	auto* AtlasTexture = ShadowRenderer->GetShadowMap();
+	const uint32 AtlasSize = ShadowRenderer->GetShadowAtlasSize();
+	const uint32 LayerCount = ShadowRenderer->GetShadowAtlasLayerCount();
+
+	if (!AtlasTexture || !AtlasTexture->GetSRV() ||
+		AtlasSize == 0 || LayerCount == 0)
+	{
+		ImGui::TextDisabled("Shadow atlas has not been created.");
+		return;
+	}
+
+	ImGui::PushID("ShadowAtlasPreview");
+
+	const uint64 AllocatedTexelCount =
+		ShadowRenderer->GetShadowAtlasAllocatedTexelCount();
+
+	const double TotalTexelCount =
+		static_cast<double>(AtlasSize) *
+		static_cast<double>(AtlasSize) *
+		static_cast<double>(LayerCount);
+
+	const float UsageRatio =
+		static_cast<float>(
+			static_cast<double>(AllocatedTexelCount) / TotalTexelCount);
+
+	ImGui::Text(
+		"Size: %u x %u | Layers: %u",
+		static_cast<unsigned int>(AtlasSize),
+		static_cast<unsigned int>(AtlasSize),
+		static_cast<unsigned int>(LayerCount));
+
+	ImGui::Text("Allocated area (all layers): %.1f%%", UsageRatio * 100.0f);
+	ImGui::ProgressBar(UsageRatio, ImVec2(-1.0f, 0.0f), "");
+
+	// 아틀라스 레이어 수가 바뀌어도 유효한 인덱스를 유지한다.
+	const int32 LastLayerIndex = static_cast<int32>(LayerCount) - 1;
+
+	if (ShadowAtlasLayerIndex < 0)
+	{
+		ShadowAtlasLayerIndex = 0;
+	}
+	else if (ShadowAtlasLayerIndex > LastLayerIndex)
+	{
+		ShadowAtlasLayerIndex = LastLayerIndex;
+	}
+
+	if (LayerCount > 1)
+	{
+		ImGui::SliderInt(
+			"Layer",
+			&ShadowAtlasLayerIndex,
+			0,
+			LastLayerIndex);
+	}
+	else
+	{
+		ImGui::TextUnformatted("Layer: 0");
+	}
+
+	ImGui::Spacing();
+
+	// 패널 너비에 맞춰 정사각형으로 표시한다.
+	const float PreviewSize = ImGui::GetContentRegionAvail().x;
+
+	if (PreviewSize > 0.0f)
+	{
+		ImGuiRenderer->ImageTextureArray(
+			AtlasTexture->GetSRV(),
+			static_cast<uint32>(ShadowAtlasLayerIndex),
+			ImVec2(PreviewSize, PreviewSize),
+			ImVec2(0.0f, 0.0f),
+			ImVec2(1.0f, 1.0f),
+			true);
+	}
+
+	ImGui::PopID();
 }

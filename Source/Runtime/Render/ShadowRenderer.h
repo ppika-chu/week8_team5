@@ -156,6 +156,10 @@ public:
 	//bool IsShadowEnabled() const { return ShadowData.bShadowEnabled != 0; }
 	//const FMatrix& GetShadowViewProjection() const { return ShadowData.LightViewProj; }
 	FTexture2D* GetShadowMap() const { return ShadowAtlas.GetTexture(); }
+	uint32 GetShadowAtlasSize() const { return ShadowAtlas.GetSize(); }
+	uint32 GetShadowAtlasLayerCount() const { return ShadowAtlas.GetLayerCount(); }
+	uint64 GetShadowAtlasAllocatedTexelCount() const;
+
 	const TArray<uint32>& GetDirtyShadowIndices() const { return DirtyShadowIndices; }
 
 	TArray<FShadowAtlasAllocation> GetShadowMapRects(uint32 LightID) const;
