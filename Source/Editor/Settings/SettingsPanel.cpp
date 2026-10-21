@@ -48,8 +48,6 @@ void FSettingsPanel::OnRender()
 	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
 	ImGui::Combo("Light Debug", &Settings.LightDebugMode, "Off\0Cell Heatmap\0Brute Force\0Slices\0");
 	ImGui::Combo("Light Culling", &Settings.LightCullingMode, "Tiled\0Clustered\0Tiled 2.5D\0");
-	const char* Models[] = { "Gouraud", "Lambert", "Blinn-Phong" };
-	ImGui::Combo("Lighting Model", &Settings.LightingModel, Models, IM_ARRAYSIZE(Models));
 	ImGui::Combo("Shadow Resolution", &Settings.ShadowResolutionQuality, "Low (512)\0Medium (1024)\0High (2048)\0Ultra (4096)\0");
 	ImGui::Combo("Shadow Filter", &Settings.ShadowFilter, "None\0PCF 3x3\0PCF 5x5\0PCSS\0");
 	ImGui::SliderInt("Cascades", &Settings.NumCascades, 1, 4);
@@ -134,8 +132,8 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DrawBatchLine=" << Settings.bDrawBatchLine << "\n";
 	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
-	File << "LightingModel=" << Settings.LightingModel << "\n";
 	File << "ShadowResolutionQuality=" << Settings.ShadowResolutionQuality << "\n";
+	File << "ShadowDistance=" << Settings.ShadowDistance << "\n";
 	File << "ShadowFilter=" << Settings.ShadowFilter << "\n";
 	File << "\n";
 
@@ -258,7 +256,6 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "DrawBatchLine") Settings.bDrawBatchLine = std::stoi(ValueStr);
 				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
-				else if (Key == "LightingModel") Settings.LightingModel = std::stoi(ValueStr);
 				else if (Key == "ShadowResolutionQuality")
 				{
 					std::istringstream Number(ValueStr);
@@ -269,7 +266,7 @@ bool FSettingsPanel::LoadSettings()
 						Settings.ShadowResolutionQuality = ShadowQualityIndex;
 					}
 				}
-
+				else if (Key == "ShadowDistance") Settings.ShadowDistance = std::stof(ValueStr);
 				else if (Key == "ShadowFilter")
 				{
 					std::istringstream Number(ValueStr);

@@ -13,6 +13,8 @@
 #include "Render/FogInfo.h"
 #include "Render/Renderer.h"
 #include "Render/ShadowRenderer.h"
+#include "Render/ShadowRenderer.h"
+#include "Core/Stats/LightStats.h"
 
 struct FExponentialHeightFogSceneInfo
 {
@@ -56,10 +58,12 @@ public:
 
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
+	FLightStats GatherLightStats() const;
 
 	FDirectionalLightSceneProxy* GetMainDirectionalLight();
 	const FBox& GetBounds() const { return BVH.GetRootBounds(); }
 	uint64 GetSceneID() const { return SceneID; }
+
 
 	TArray<FPrimitiveSceneProxy*> PrimitiveSceneProxies;
 	TArray<FPrimitiveSceneProxy*> DirtyProxies;
@@ -78,6 +82,8 @@ public:
 		}
 	};
 	bool bElementListChanged = false;
+
+	uint32 ShadowBuiltCount[6]{};			// stat light 에서 실제로 빌드된 lights 개수만 보여줌.
 
 	TArray<FLocalLightSceneProxy*>        LocalLightProxies;      // ↔ PackedIndex ↔
 	TArray<FLightRenderParameters>        LocalLightParameters;   // GPU 업로드용, 같은 순서
