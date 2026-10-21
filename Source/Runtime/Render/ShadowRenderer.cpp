@@ -49,7 +49,7 @@ bool FShadowRenderer::Init(FRenderer* InRenderer)
 
 	if (!RenderCommand::SupportsClearView())
 	{
-		// ClearView Áö¿øÇÏÁö ¾ÊÀ¸¸é ShadowRenderer¸¦ »ç¿ëÇÒ ¼ö ¾ø´Ù.
+		// ClearView ì§€ì›í•˜ì§€ ì•Šìœ¼ë©´ ShadowRendererë¥¼ ì‚¬ìš©í•  ìˆ˜ ì—†ë‹¤.
 		return false;
 	}
 
@@ -421,7 +421,7 @@ void FShadowRenderer::BeginShadowPass()
 		},
 		.DepthStencil = {
 			.Texture = ShadowAtlas.GetTexture(),
-			.LoadOp = ERenderTargetLoadOp::Load, // LoadOpÀ» Load·Î ¼³Á¤ÇÏ¿© ±âÁ¸ ³»¿ëÀ» À¯Áö
+			.LoadOp = ERenderTargetLoadOp::Load, // LoadOpì„ Loadë¡œ ì„¤ì •í•˜ì—¬ ê¸°ì¡´ ë‚´ìš©ì„ ìœ ì§€
 		}
 	};
 
@@ -439,13 +439,13 @@ void FShadowRenderer::UpdateCasterSet(uint32 ShadowInfoIndex, const TArray<FShad
 	Frame.RequestedCasterStates = CasterStates;
 	auto& Requested = Frame.RequestedCasterStates;
 
-	// ?˜ì§‘ ?œì„œê°€ ?¬ë¼??ê°™ì? ì§‘í•©?¼ë¡œ ë¹„êµ?œë‹¤.
+	// ?ï¿½ì§‘ ?ï¿½ì„œê°€ ?ï¿½ë¼??ê°™ï¿½? ì§‘í•©?ï¿½ë¡œ ë¹„êµ?ï¿½ë‹¤.
 	std::sort(Requested.begin(), Requested.end(), [](const auto& Left, const auto& Right)
 	{
 		return Left.CasterID < Right.CasterID;
 	});
 
-	// ?´ë? Dirty?¬ë„ ?Œë”ë§????€?¥í•  ?´ë²ˆ ëª©ë¡?€ ?„ì—???•ë³´?œë‹¤.
+	// ?ï¿½ï¿½? Dirty?ï¿½ë„ ?ï¿½ë”ï¿½????ï¿½?ï¿½í•  ?ï¿½ë²ˆ ëª©ë¡?ï¿½ ?ï¿½ì—???ï¿½ë³´?ï¿½ë‹¤.
 	if (DirtyShadowIndices.Find(ShadowInfoIndex) != INDEX_NONE)
 	{
 		return;
@@ -530,7 +530,7 @@ void FShadowRenderer::OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex
 
 	Cache->RenderedRevision = Frame.RequestedRevision;
 	Cache->RenderedLightViewProj = ShadowInfo.LightViewProj;
-	// ê¹Šì´ë¥??¤ì‹œ ê·¸ë¦° ?¤ì—ë§?ìºì‹œ??Caster ê¸°ë¡??êµì²´?œë‹¤.
+	// ê¹Šì´ï¿½??ï¿½ì‹œ ê·¸ë¦° ?ï¿½ì—ï¿½?ìºì‹œ??Caster ê¸°ë¡??êµì²´?ï¿½ë‹¤.
 	Cache->RenderedCasterStates = Frame.RequestedCasterStates;
 	Cache->bHasRenderedContent = true;
 }
