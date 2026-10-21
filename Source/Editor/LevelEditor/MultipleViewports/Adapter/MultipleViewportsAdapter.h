@@ -127,12 +127,19 @@ public:
     FMatrix GetEngineView(int32 ViewIndex) const;
     FMatrix GetEngineProjection(int32 ViewIndex) const;
 
-    void CollectShadowCasterStates(const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates);
+    void CollectShadowCasterStates(
+        const FMatrix& LightViewProj, TArray<FShadowCasterState>& OutCasterStates,
+        const FMatrix& CameraViewProjection, const FVector2& ViewportSize,
+        float MinimumCasterSizePixels);
     void BuildShadowQueue(
         const TArray<FShadowCasterState>& CasterStates,
         FRenderQueue& OutQueue);
 
 private:
+    static bool TryGetShadowBoundsSizePixels(
+        const FAABB& Bounds, const FMatrix& CameraViewProjection,
+        const FVector2& ViewportSize, float& OutSizePixels);
+
     // Override가 있으면 그 카메라를, 없으면 저장 카메라를 반환한다. 외부 View는 Override만 쓴다.
     const FViewCamera& GetEffectiveCamera(int32 ViewIndex) const
     {
