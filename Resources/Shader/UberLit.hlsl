@@ -353,8 +353,12 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     }
 
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
+    
+    uint TexelCountX, TexelCountY, LayerCount;
+    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY, LayerCount);
+    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
 #if defined(SHADOW_FILTER_NONE)
-    return ShadowMapAtlas.SampleLevel(PointSampler, ReceiverUV.xy, 0) >= Depth - ReceiverBias ? 1.0f : 0.0f;
+    return ShadowMapAtlas.SampleLevel(PointSampler, float3(ReceiverUV.xy, (float)Info.ArrayIndex), 0) >= Depth - ReceiverBias ? 1.0f : 0.0f;
 #else
     float3 DuvDx = mul(float4(WorldPosDDX, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
     float3 DuvDy = mul(float4(WorldPosDDY, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
@@ -365,9 +369,6 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         if (Det != 0.0f)
             InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
 #endif
-    uint TexelCountX, TexelCountY, LayerCount;
-    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY, LayerCount);
-    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
     float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
     float2 TileMinUV = Info.AtlasOffset;
     float2 TileMaxUV = Info.AtlasOffset + Info.AtlasScale;
@@ -572,7 +573,7 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
     const float SlopeBias = max(DepthPerTexel.x, DepthPerTexel.y) * SlopeScale;
     const float ReceiverBias = ConstantBias + SlopeBias * Info.SlopeBias;
 #if defined(SHADOW_FILTER_NONE)
-    return ShadowMapAtlas.SampleLevel(PointSampler, AtlasUV, 0) >= Ndc.z - ReceiverBias ? 1.0f : 0.0f;
+    return ShadowMapAtlas.SampleLevel(PointSampler, float3(AtlasUV, (float)Info.ArrayIndex), 0) >= Ndc.z - ReceiverBias ? 1.0f : 0.0f;
 #else
 #if defined(SHADOW_FILTER_PCSS)
     if (Light.SourceRadius <= 0.0f)
