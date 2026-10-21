@@ -311,7 +311,7 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FLODViewContex
 							SlotDest + size_t(VisibleIndex) * ObjectSlotBytes,
 							Proxy->GetLocalToWorld(),
 							Proxy->GetWorldToLocal(),
-							Proxy->IsReceivingShadows());
+							Proxy->IsReceivingShadows(), Proxy->GetShadowNormalOffset());
 						Slot = VisibleIndex;
 					}
 
@@ -401,7 +401,7 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FLODViewContex
 						SlotDest + size_t(NextExtraSlot) * ObjectSlotBytes,
 						Model,
 						WorldToLocal,
-						bReceiveShadows);
+						bReceiveShadows, Packet.Proxy ? Packet.Proxy->GetShadowNormalOffset() : Proxy->GetShadowNormalOffset());
 					Packet.Slot = NextExtraSlot++;
 				}
 			}

@@ -87,7 +87,8 @@ cbuffer PerObjectConstants : register(b2)
     matrix WorldInverseTranspose; // (World^-1)^T
 
     uint bReceiveShadows;
-    uint3 PerObjectPadding;
+    float ShadowNormalOffset;
+    uint2 PerObjectPadding;
 };
 
 // b3는 FireBall이 쓰는 동안 비워 둔다.
@@ -130,7 +131,7 @@ struct FShadowInfo
     matrix LightViewProjection;
     float2 AtlasOffset;
     float2 AtlasScale;
-    
+
     float DepthBias;
     float PrescaledTangentTheta;
     float SlopeBias;
@@ -161,12 +162,11 @@ StructuredBuffer<uint> CellLightIndices : register(t12);
 
 #define CASTER_SEARCH_COUNT 16
 #define CASTER_SAMPLE_COUNT 32
+#define SHADOW_RECEIVER_PLANE_BIAS 1 // 0: 끔, 1: 탭별 수신평면 깊이 보정
+#define SHADOW_RECEIVER_PLANE_BIAS_RELAX_ONLY 1 // (SHADOW_RECEIVER_PLANE_BIAS == 1 일 때)0: 양방향 보정, 1: 비교 깊이를 얕게만 보정
 static const float CSMDepthBias = 10.0f;
 static const float LocalShadowDepthBias = 10.0f;
 static const float ShadowMaxSlopeScaleDepthBias = 100.0f; // slope 기울기 최대값. tan()차원이므로 1이면 45도보다 기울기 크면 45도로 취급
-#ifndef SHADOW_RECEIVER_PLANE_FROM_NORMAL
-#define SHADOW_RECEIVER_PLANE_FROM_NORMAL 1 // 1: 보간 버텍스 노멀, 0: 위치의 ddx/ddy
-#endif
 #ifndef SHADOW_POISSON_RANDOM_ROTATION
 #define SHADOW_POISSON_RANDOM_ROTATION 1 // 0: 고정 패턴, 1: 픽셀별 회전 (프레임 간 고정)
 #endif
@@ -325,26 +325,37 @@ bool ProjectToShadowMap(float3 WorldPos, matrix LightVP, out float2 OutUV, out f
         && OutDepth >= 0.0f && OutDepth <= 1.0f;
 }
 
-float CalcDirectionalShadowBias(FShadowInfo Info, float3 WorldNormal, float2 TileResolution)
+float ApplyReceiverPlaneDepthBias(float DepthDelta)
 {
-    // SlopeBias는 래스터라이저 동작과 동일(단, 버텍스 노멀을 사용)
+#if !SHADOW_RECEIVER_PLANE_BIAS
+    return 0.0f;
+#elif SHADOW_RECEIVER_PLANE_BIAS_RELAX_ONLY
+    return min(DepthDelta, 0.0f);
+#else
+    return DepthDelta;
+#endif
+}
+
+float CalcDirectionalShadowBias(FShadowInfo Info, float3 WorldPosDDX, float3 WorldPosDDY, float2 TileResolution)
+{
+    const float3 GeometricNormal = cross(WorldPosDDX, WorldPosDDY);
     const float3 LightDepthAxis = float3(Info.LightViewProjection[0].z, Info.LightViewProjection[1].z, Info.LightViewProjection[2].z);
     const float3 LightUAxis = float3(Info.LightViewProjection[0].x, Info.LightViewProjection[1].x, Info.LightViewProjection[2].x);
     const float3 LightVAxis = float3(Info.LightViewProjection[0].y, Info.LightViewProjection[1].y, Info.LightViewProjection[2].y);
     const float2 MapWorldSize = 2.0f / float2(length(LightUAxis), length(LightVAxis));
     const float DepthRange = rcp(length(LightDepthAxis));
     const float2 TexelWorldSize = MapWorldSize / TileResolution;
-    const float3 LightNormal = float3(dot(WorldNormal, normalize(LightUAxis)), dot(WorldNormal, normalize(LightVAxis)), dot(WorldNormal, normalize(LightDepthAxis)));
+    const float3 LightNormal = float3(dot(GeometricNormal, normalize(LightUAxis)), dot(GeometricNormal, normalize(LightVAxis)), dot(GeometricNormal, normalize(LightDepthAxis)));
     // tan(theta) = length(N.xy) / abs(N.z)의 상한을 적용한다.
     const float ClampedSlopeDivisor = max(abs(LightNormal.z), length(LightNormal.xy) / ShadowMaxSlopeScaleDepthBias);
-    const float2 DepthSlope = abs(LightNormal.xy) / ClampedSlopeDivisor;
+    const float2 DepthSlope = ClampedSlopeDivisor > 0.0f ? abs(LightNormal.xy) / ClampedSlopeDivisor : 0.0f;
     const float ConstantBias = Info.DepthBias * CSMDepthBias * (TexelWorldSize.x * 0.5f) / DepthRange;
     const float SlopeBias = max(DepthSlope.x * TexelWorldSize.x, DepthSlope.y * TexelWorldSize.y) / DepthRange;
     return ConstantBias + SlopeBias * Info.SlopeBias;
 }
 
 // 아틀라스에서 해당 맵의 Tile 가져와서 비교. 1 = 빛을 받음 / 0 = 빛을 안 받음 (그림자)
-float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal, float2x2 PoissonRotation)
+float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
 {
     // 비활성 Cascade도 선택과 블렌딩에 참여하며 가시율은 1이다.
     if (Info.bShadowActive == 0)
@@ -353,10 +364,9 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     }
 
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
-    
     uint TexelCountX, TexelCountY, LayerCount;
     ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY, LayerCount);
-    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
+    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldPosDDX, WorldPosDDY, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
 #if defined(SHADOW_FILTER_NONE)
     return ShadowMapAtlas.SampleLevel(PointSampler, float3(ReceiverUV.xy, (float)Info.ArrayIndex), 0) >= Depth - ReceiverBias ? 1.0f : 0.0f;
 #else
@@ -364,11 +374,8 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     float3 DuvDy = mul(float4(WorldPosDDY, 0.0f), Info.LightViewProjection).xyz * float3(0.5f, -0.5f, 1.0f) * float3(Info.AtlasScale, 1.0f);
     float Det = DuvDx.x * DuvDy.y - DuvDx.y * DuvDy.x;
     float2x2 InvMatrix = float2x2(0, 0, 0, 0);
-#if !LIGHTING_MODEL_GOURAUD || SHADOW_RECEIVER_PLANE_FROM_NORMAL
-    //if (abs(Det) >= 1e-9f * Info.AtlasScale.x)
-        if (Det != 0.0f)
-            InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
-#endif
+    if (Det != 0.0f)
+        InvMatrix = float2x2(DuvDy.y, -DuvDx.y, -DuvDy.x, DuvDx.x) / Det;
     float2 TexelStep = 1.0f / float2(TexelCountX, TexelCountY);
     float2 TileMinUV = Info.AtlasOffset;
     float2 TileMaxUV = Info.AtlasOffset + Info.AtlasScale;
@@ -389,7 +396,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
             continue;
         const float2 TexelCenterUV = (floor(SampleUV * float2(TexelCountX, TexelCountY)) + 0.5f) * TexelStep;
         const float2 ReceiverOffsetUV = TexelCenterUV - ReceiverUV.xy;
-        float ReceiverDepth = ReceiverOffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + ReceiverOffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - ReceiverBias;
+        float ReceiverDepth = ApplyReceiverPlaneDepthBias(ReceiverOffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + ReceiverOffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z)) + ReceiverUV.z - ReceiverBias;
         float DepthSampled = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, (float)Info.ArrayIndex), 0);
         if (DepthSampled < ReceiverDepth)
         {
@@ -412,7 +419,7 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
         float2 SampleUV = ReceiverUV.xy + OffsetUV;
         if (any(SampleUV < TileMinUV + 0.5f * TexelStep) || any(SampleUV > TileMaxUV - 0.5f * TexelStep))
             continue;
-        float ReceiverDepth = OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z) + ReceiverUV.z - ReceiverBias;
+        float ReceiverDepth = ApplyReceiverPlaneDepthBias(OffsetUV.x * TexelCountX * (DxyDu.x * DuvDx.z + DxyDu.y * DuvDy.z) + OffsetUV.y * TexelCountY * (DxyDv.x * DuvDx.z + DxyDv.y * DuvDy.z)) + ReceiverUV.z - ReceiverBias;
         PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(SampleUV, (float)Info.ArrayIndex), ReceiverDepth);
         ++SampleCount;
     }
@@ -434,7 +441,7 @@ uint FindCascadeIndex(float3 WorldPos)
     return Range.Count;
 }
 
-float CalcDirectionalShadow(float3 WorldPos, float3 WorldNormal, float2x2 PoissonRotation, out uint OutCascade, out float OutBlendT)
+float CalcDirectionalShadow(float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float3 WorldNormal, float2x2 PoissonRotation, out uint OutCascade, out float OutBlendT)
 {
     OutCascade = LightShadowRanges[0].Count;        // 모든 cascade 밖
     OutBlendT = 1.0f;                               // no blend
@@ -452,22 +459,6 @@ float CalcDirectionalShadow(float3 WorldPos, float3 WorldNormal, float2x2 Poisso
     if (Range.Count == 0)
         return 1.0f; // 그림자 없는 Directional Light
 
-    // 노멀 모드에서는 화면 미분 대신 같은 접평면을 나타내는 두 방향을 사용한다.
-#if defined(SHADOW_FILTER_NONE)
-    const float3 WorldPosDDX = 0.0f;
-    const float3 WorldPosDDY = 0.0f;
-#elif SHADOW_RECEIVER_PLANE_FROM_NORMAL
-    const float3 ReferenceAxis = abs(WorldNormal.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
-    const float3 WorldPosDDX = normalize(cross(ReferenceAxis, WorldNormal));
-    const float3 WorldPosDDY = cross(WorldNormal, WorldPosDDX);
-#elif LIGHTING_MODEL_GOURAUD
-    const float3 WorldPosDDX = 0.0f;
-    const float3 WorldPosDDY = 0.0f;
-#else
-    const float3 WorldPosDDX = ddx(WorldPos);
-    const float3 WorldPosDDY = ddy(WorldPos);
-#endif
-
     // 앞쪽 Cascade부터 검색
     for (uint i = 0; i < Range.Count; ++i)
     {   
@@ -481,7 +472,7 @@ float CalcDirectionalShadow(float3 WorldPos, float3 WorldNormal, float2x2 Poisso
         OutCascade = i;
         
         // 그림자면 0 빛이면 1
-        const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY, WorldNormal, PoissonRotation);
+        const float Shadow = SampleShadowTile(Info, UV, Depth, WorldPosDDX, WorldPosDDY, PoissonRotation);
 
         // 현재 위치에서 가장자리 위치까지 거리 uv + depth 구간 확인
         const float EdgeDist = min(min(min(UV.x, UV.y), min(1.0f - UV.x, 1.0f - UV.y)), min(Depth, 1.0f - Depth));
@@ -498,7 +489,7 @@ float CalcDirectionalShadow(float3 WorldPos, float3 WorldNormal, float2x2 Poisso
         
         OutBlendT = EdgeDist / Range.BlendWidth;
         // lerp(A, B, t) : t가 0 이면 A, 1이면 B
-        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY, WorldNormal, PoissonRotation), Shadow, EdgeDist / Range.BlendWidth);
+        return lerp(SampleShadowTile(NextInfo, NextUV, NextDepth, WorldPosDDX, WorldPosDDY, PoissonRotation), Shadow, EdgeDist / Range.BlendWidth);
     }
 
     // 모든 Cascade 밖이면 
@@ -520,15 +511,7 @@ float2 CalcLocalShadowDepthGradient(FShadowInfo Info, float4 LightClip, float3 W
     return float2(DuvDx.z * DuvDy.y - DuvDy.z * DuvDx.y, DuvDy.z * DuvDx.x - DuvDx.z * DuvDy.x) / Det;
 }
 
-float2 CalcLocalShadowDepthGradientFromNormal(FShadowInfo Info, float4 LightClip, float3 WorldNormal)
-{
-    const float3 ReferenceAxis = abs(WorldNormal.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
-    const float3 WorldPosDDX = normalize(cross(ReferenceAxis, WorldNormal));
-    const float3 WorldPosDDY = cross(WorldNormal, WorldPosDDX);
-    return CalcLocalShadowDepthGradient(Info, LightClip, WorldPosDDX, WorldPosDDY);
-}
-
-float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 WorldPos, float3 WorldNormal, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
+float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
 {
     if (Info.bShadowActive == 0)
     {
@@ -563,16 +546,11 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
     const float ViewDepthBias = min(Info.DepthBias * LocalShadowDepthBias * (TexelWorldSize * 0.5f), ReceiverViewDepth - LightNear);
     // D(z) - D(z - b): 뷰 깊이 방향의 오프셋을 비교용 투영 깊이로 변환한다.
     const float ConstantBias = LightNear * LightFar * ViewDepthBias / ((LightFar - LightNear) * ReceiverViewDepth * (ReceiverViewDepth - ViewDepthBias));
-    const float2 NormalDepthGradient = CalcLocalShadowDepthGradientFromNormal(Info, LightClip, WorldNormal);
-#if !defined(SHADOW_FILTER_NONE)
-#if SHADOW_RECEIVER_PLANE_FROM_NORMAL
-    const float2 DepthGradient = NormalDepthGradient;
-#else
     const float2 DepthGradient = CalcLocalShadowDepthGradient(Info, LightClip, WorldPosDDX, WorldPosDDY);
-#endif
-#endif
-    const float2 DepthPerTexel = abs(NormalDepthGradient) * TexelStep;
-    const float NoL = saturate(abs(dot(WorldNormal, normalize(Light.Position - WorldPos))));
+    const float2 DepthPerTexel = abs(DepthGradient) * TexelStep;
+    const float3 GeometricNormal = cross(WorldPosDDX, WorldPosDDY);
+    const float NormalLength = length(GeometricNormal);
+    const float NoL = NormalLength > 0.0f ? saturate(abs(dot(GeometricNormal, normalize(Light.Position - WorldPos))) / NormalLength) : 1.0f;
     // tan(theta)의 상한에 해당하는 비율만 슬로프 바이어스 항에 적용한다.
     const float SlopeScale = NoL / max(NoL, sqrt(saturate(1.0f - NoL * NoL)) / ShadowMaxSlopeScaleDepthBias);
     const float SlopeBias = max(DepthPerTexel.x, DepthPerTexel.y) * SlopeScale;
@@ -593,7 +571,7 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
     {
         const float2 SampleUV = AtlasUV + SearchRadius * mul(PoissonRotation, PoissonDisk[i]);
         const float2 TexelCenterUV = (floor(SampleUV * AtlasSize) + 0.5f) * TexelStep;
-        const float ReceiverDepth = Ndc.z + dot(DepthGradient, TexelCenterUV - AtlasUV) - ReceiverBias;
+        const float ReceiverDepth = Ndc.z + ApplyReceiverPlaneDepthBias(dot(DepthGradient, TexelCenterUV - AtlasUV)) - ReceiverBias;
         const float MapDepth = ShadowMapAtlas.SampleLevel(PointSampler, float3(SampleUV, (float)Info.ArrayIndex), 0);
         if (MapDepth < ReceiverDepth)
         {
@@ -614,7 +592,7 @@ float SampleShadowInfo(FShadowInfo Info, FLightRenderParameters Light, float3 Wo
     for (uint j = 0; j < CASTER_SAMPLE_COUNT; ++j)
     {
         const float2 OffsetUV = FilterRadius * mul(PoissonRotation, PoissonDisk[j]);
-        const float ReceiverDepth = Ndc.z + dot(DepthGradient, OffsetUV) - ReceiverBias;
+        const float ReceiverDepth = Ndc.z + ApplyReceiverPlaneDepthBias(dot(DepthGradient, OffsetUV)) - ReceiverBias;
         PercentLit += ShadowMapAtlas.SampleCmpLevelZero(LinearCmpSampler, float3(AtlasUV + OffsetUV, (float)Info.ArrayIndex), ReceiverDepth);
     }
     return PercentLit / CASTER_SAMPLE_COUNT;
@@ -638,7 +616,7 @@ uint GetPointShadowFace(float3 LightToSurface)
 float CalcLocalShadow(
     uint LightIndex,
     FLightRenderParameters Light,
-    float3 WorldPos, float3 WorldNormal, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
+    float3 WorldPos, float3 WorldPosDDX, float3 WorldPosDDY, float2x2 PoissonRotation)
 {
     if (bReceiveShadows == 0)
     {
@@ -668,7 +646,7 @@ float CalcLocalShadow(
         return 1.0f; // 그림자 맵이 없는 면이면 빛을 받는 것으로 간주
     
     const FShadowInfo Info = ShadowInfos[Range.Offset + FaceIndex];
-    return SampleShadowInfo(Info, Light, WorldPos, WorldNormal, WorldPosDDX, WorldPosDDY, PoissonRotation);
+    return SampleShadowInfo(Info, Light, WorldPos, WorldPosDDX, WorldPosDDY, PoissonRotation);
 }
 
 // Directional Light의 영향을 구한다
@@ -809,25 +787,26 @@ const bool CanContribute(FLightRenderParameters Light, float3 WorldPos, float3 N
 // Directional + 로컬 라이트의 Diffuse/Specular를 모두 더한다. Ambient는 포함하지 않는다.
 // bUseLightGrid = true면 SvPosition이 속한 셀의 라이트만, false면 전체 로컬 라이트를 순회한다.
 // VS(Gouraud)는 픽셀 위치가 없어 셀을 쓸 수 없으므로 false로 호출한다.
-FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid, float3 VertexNormal, out uint Cascade, out float BlendT)
+FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos, float3 ShadowWorldPos, float InShininess, float4 SvPosition, bool bUseLightGrid, out uint Cascade, out float BlendT)
 {
 #if SHADOW_POISSON_RANDOM_ROTATION && !LIGHTING_MODEL_GOURAUD && !defined(SHADOW_FILTER_NONE)
     const float2x2 PoissonRotation = CalcPoissonRotation(SvPosition.xy);
 #else
     const float2x2 PoissonRotation = float2x2(1.0f, 0.0f, 0.0f, 1.0f);
 #endif
-#if !defined(SHADOW_FILTER_NONE) && !SHADOW_RECEIVER_PLANE_FROM_NORMAL && !LIGHTING_MODEL_GOURAUD
+#if !LIGHTING_MODEL_GOURAUD
     // 라이트 선택과 CanContribute 분기 전에 미분한다.
     const float3 WorldPosDDX = ddx(WorldPos);
     const float3 WorldPosDDY = ddy(WorldPos);
 #else
+    // Gouraud는 VS에서 계산하므로 기울기 보정 없이 고정 바이어스만 적용한다.
     const float3 WorldPosDDX = 0.0f;
     const float3 WorldPosDDY = 0.0f;
 #endif
 
     // Directional Light는 처음에 한 번만 계산
     FLightContribution Total = CalcDirectionalLight(N, V, InShininess);
-    const float DirectionalShadow = CalcDirectionalShadow(WorldPos, VertexNormal, PoissonRotation, Cascade, BlendT);
+    const float DirectionalShadow = CalcDirectionalShadow(ShadowWorldPos, WorldPosDDX, WorldPosDDY, PoissonRotation, Cascade, BlendT);
     Total.Diffuse *= DirectionalShadow;
     Total.Specular *= DirectionalShadow;
 
@@ -856,7 +835,7 @@ FLightContribution AccumulateDirectLighting(float3 N, float3 V, float3 WorldPos,
         if (!bCanContribute)
             continue;
         
-        Shadow = CalcLocalShadow(LightIndex, Light, WorldPos, VertexNormal, WorldPosDDX, WorldPosDDY, PoissonRotation);
+        Shadow = CalcLocalShadow(LightIndex, Light, ShadowWorldPos, WorldPosDDX, WorldPosDDY, PoissonRotation);
         
         if (Shadow == 0.0f)
             continue;
@@ -886,8 +865,7 @@ VS_OUTPUT mainVS(VS_INPUT Input)
     Output.Color = Input.Color;
 #if LIGHTING_MODEL_GOURAUD
     const float3 V = normalize(CameraWorldPos - Output.WorldPos);
-    uint DummyCascade; float DummyBlendT;
-    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, normalize(Output.Normal), DummyCascade, DummyBlendT);
+    const FLightContribution Contribution = AccumulateDirectLighting(normalize(Output.Normal), V, Output.WorldPos, 1, Output.SvPosition, false, normalize(Output.Normal));
     Output.VertexDiffuse = Contribution.Diffuse;
 #endif
     return Output;
@@ -918,6 +896,7 @@ float4 mainPS(VS_OUTPUT Input) : SV_TARGET
 #endif
 
     const float3 VertexNormal = { normalize(Input.Normal) };
+    const float3 ShadowWorldPos = Input.WorldPos + ShadowNormalOffset * VertexNormal;
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG) || defined(WORLD_NORMAL)
     // TBN: 노멀맵의 탄젠트 공간 노멀을 월드 공간으로 옮긴다.
     const float3 T = { normalize(Input.Tangent.xyz - VertexNormal * dot(VertexNormal, Input.Tangent.xyz)) };
@@ -942,12 +921,12 @@ float BlendT = 1.0f;
 
 #if defined(LIGHTING_MODEL_LAMBERT) || defined(LIGHTING_MODEL_BLINN_PHONG)
     const float3 V = { normalize(CameraWorldPos - Input.WorldPos) };
-    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, Shininess, Input.SvPosition, true, VertexNormal, Cascade, BlendT) };
+    const FLightContribution Contribution = { AccumulateDirectLighting(N, V, Input.WorldPos, ShadowWorldPos, Shininess, Input.SvPosition, true, Cascade, BlendT) };
     DiffuseLighting += Contribution.Diffuse;
     SpecularLighting = Contribution.Specular;
 #elif LIGHTING_MODEL_GOURAUD
     DiffuseLighting += Input.VertexDiffuse;
-    Cascade = FindCascadeIndex(Input.WorldPos);
+    Cascade = FindCascadeIndex(ShadowWorldPos);
 #endif
     // Cascade 디버그
     if (bReceiveShadows != 0 &&
