@@ -353,9 +353,6 @@ float SampleShadowTile(FShadowInfo Info, float2 UV, float Depth, float3 WorldPos
     }
 
     const float3 ReceiverUV = float3(UV * Info.AtlasScale + Info.AtlasOffset, Depth);
-    uint TexelCountX, TexelCountY;
-    ShadowMapAtlas.GetDimensions(TexelCountX, TexelCountY);
-    const float ReceiverBias = CalcDirectionalShadowBias(Info, WorldNormal, float2(TexelCountX, TexelCountY) * Info.AtlasScale);
 #if defined(SHADOW_FILTER_NONE)
     return ShadowMapAtlas.SampleLevel(PointSampler, ReceiverUV.xy, 0) >= Depth - ReceiverBias ? 1.0f : 0.0f;
 #else
