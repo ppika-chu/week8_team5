@@ -117,6 +117,12 @@ struct FShadowFrameEntry
 
 class FShadowRenderer
 {
+private:
+	struct FShadowRequestSignature
+	{
+		FShadowKey Key{};
+		uint32 Resolution = 0;
+	};
 public:
 	bool Init(FRenderer* InRenderer);
 
@@ -146,6 +152,11 @@ public:
 
 	TArray<FShadowAtlasAllocation> GetShadowMapRects(uint32 LightID) const;
 	TArray<FShadowInfo> GetShadowInfosByLightUUID(uint32 LightID) const;
+
+	void RequestShadowAllocationRetry()
+	{
+		bRetryShadowAllocation = true;
+	}
 
 private:
 	FRenderer* Renderer = nullptr;
@@ -179,6 +190,9 @@ private:
 	TArray<uint32> DirtyShadowIndices;
 
 	uint64 CachedSceneID = 0;
+
+	TArray<FShadowRequestSignature> LastShadowRequests;
+	bool bRetryShadowAllocation = false;
 
 	/* */
 	const float HalfDirectionalLightSourceAngularDiameterRad = 0.0046748644f;

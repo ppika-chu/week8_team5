@@ -11,6 +11,11 @@ bool FShadowAtlas::TryPack(
 {
 	assert(OutAllocations || OutRequiredLayers);
 
+	if (!OutAllocations || !OutRequiredLayers)
+	{
+		return false;
+	}
+
 	OutAllocations->Reset();
 	*OutRequiredLayers = 0;
 
@@ -19,10 +24,8 @@ bool FShadowAtlas::TryPack(
 		return false;
 	}
 
-	//TArray<FShelf> Shelves;
 	TArray<FLayerPackingState> Layers;
-	TArray<FShadowAtlasAllocation> Allocations;
-	Allocations.Reset(Resolutions.Num());
+	OutAllocations->Reset(Resolutions.Num());
 
 	for (uint32 Resolution : Resolutions)
 	{
@@ -73,12 +76,15 @@ bool FShadowAtlas::TryPack(
 			}
 		}
 
-		Allocations.Add(ALlocation);
+		OutAllocations->Add(ALlocation);
+
+		*OutRequiredLayers = FMath::Max(
+			*OutRequiredLayers,
+			ALlocation.ArrayIndex + 1);
 	}
 
-	*OutRequiredLayers = Layers.Num();
-	*OutAllocations = std::move(Allocations);
-	return true;
+	// return true if all resolutions were successfully placed
+	return OutAllocations->Num() == Resolutions.Num();
 }
 
 bool FShadowAtlas::TryPlaceInLayer(
@@ -170,7 +176,7 @@ bool FShadowAtlas::EnsureTextureSize(uint32 RequiredSize, uint32 RequiredLayers)
 
 	// Always create a new texture as a texture 2d array
 	auto NewTexture = RenderCommand::CreateTexture2D(Desc, nullptr, true);
-	assert(NewTexture->GetDimension() == ETextureDimension::Texture2DArray);
+	//assert(NewTexture->GetDimension() == ETextureDimension::Texture2DArray);
 
 	if (!NewTexture || !NewTexture->GetRawPtr() || !NewTexture->GetSRV())
 	{
