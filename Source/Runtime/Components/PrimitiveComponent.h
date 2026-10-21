@@ -30,6 +30,7 @@ class UPrimitiveComponent :public USceneComponent
 		PROPERTY(bVisible)
 		PROPERTY(bCastShadows)
 		PROPERTY(bReceiveShadows)
+		PROPERTY_META(ShadowNormalOffset, .DragSpeed = 0.001f, .Format = "%.4f")
 		REFLECT_END()
 public:
 	UPrimitiveComponent();
@@ -64,6 +65,7 @@ public:
 
 	bool IsCastingShadows() const { return bCastShadows; }
 	bool IsReceivingShadows() const { return bReceiveShadows; }
+	float GetShadowNormalOffset() const { return ShadowNormalOffset; }
 
 	void SetCastShadows(bool bNewCastShadows)
 	{
@@ -84,6 +86,14 @@ public:
 		}
 
 		bReceiveShadows = bNewReceiveShadows;
+		MarkRenderStateDirty();
+	}
+
+	void SetShadowNormalOffset(float InOffset)
+	{
+		if (ShadowNormalOffset == InOffset)
+			return;
+		ShadowNormalOffset = InOffset;
 		MarkRenderStateDirty();
 	}
 
@@ -118,6 +128,7 @@ protected:
 	bool bVisible = true;
 	bool bCastShadows = true;
 	bool bReceiveShadows = true;
+	float ShadowNormalOffset = 0.0f; // 그림자 조회 위치를 노멀 방향으로 옮기는 월드 거리
 
 private:
 	friend class FScene;

@@ -20,7 +20,8 @@ struct alignas(16) FPerObjectConstants
 	// (World^-1)^T. 비균등 스케일에서도 노멀이 표면에 수직으로 남도록 노멀 변환에 쓴다.
 	FMatrix NormalMatrix;
 	uint32 bReceiveShadows = 1;
-	uint32 Padding[3] = {};
+	float ShadowNormalOffset = 0.0f;
+	uint32 Padding[2] = {};
 };
 static_assert(sizeof(FPerObjectConstants) == 144, "UberLit.hlsl cbuffer PerObjectConstants 크기와 맞아야 한다");
 
@@ -29,12 +30,13 @@ inline void WritePerObjectConstants(
 	uint8* Dest,
 	const FMatrix& World,
 	const FMatrix& WorldToLocal,
-	bool bReceiveShadows)
+	bool bReceiveShadows, float ShadowNormalOffset)
 {
 	FPerObjectConstants Constants{};
 	Constants.World = World;
 	Constants.NormalMatrix = WorldToLocal.GetTransposed();
 	Constants.bReceiveShadows = bReceiveShadows ? 1u : 0u;
+	Constants.ShadowNormalOffset = ShadowNormalOffset;
 	std::memcpy(Dest, &Constants, sizeof(Constants));
 }
 
@@ -262,7 +264,7 @@ private:
 	void DrawStaticGroups();
 	void UpdatePerObjectConstants(
 		const FMatrix& World,
-		bool bReceiveShadows = true);
+		bool bReceiveShadows = true, float ShadowNormalOffset = 0.0f);
 	void BindMaterial(UMaterial* Material);
 	void UpdateMaterialParams(const FRenderPacket& RenderPacket);
 	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);

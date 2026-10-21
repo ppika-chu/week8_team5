@@ -28,6 +28,7 @@ public:
     bool IsVisible() const { return bVisible; }
     bool IsCastingShadows() const { return bCastShadows; }
     bool IsReceivingShadows() const { return bReceiveShadows; }
+    float GetShadowNormalOffset() const { return ShadowNormalOffset; }
     uint8 GetLODCount() const { return RenderState ? RenderState->LODCount : 1; }
     const FMeshRenderState* GetRenderState() const { return RenderState.get(); }
     const float* GetLODThresholdsSq() const { return RenderState->LODThresholdSq; }
@@ -51,4 +52,5 @@ private:
     bool bVisible = true;
     bool bCastShadows = true;
     bool bReceiveShadows = true;
+    float ShadowNormalOffset = 0.0f;
 };

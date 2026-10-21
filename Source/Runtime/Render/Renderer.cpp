@@ -138,7 +138,7 @@ void FRenderer::UploadPerObjectConstants()
 			Dest + static_cast<size_t>(Index) * ObjectSlotBytes,
 			Model,
 			WorldToLocal,
-			bReceiveShadows);
+			bReceiveShadows, P.Proxy ? P.Proxy->GetShadowNormalOffset() : 0.0f);
 		P.Slot = Index;
 	}
 
@@ -225,7 +225,7 @@ void FRenderer::DrawStaticGroups()
 				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
 				UpdatePerObjectConstants(
 					Item.Proxy->GetLocalToWorld(),
-					Item.Proxy->IsReceivingShadows());
+					Item.Proxy->IsReceivingShadows(), Item.Proxy->GetShadowNormalOffset());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -372,13 +372,14 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		bool bOccludedByGpu;
 		const FRenderPacket* Packet;
 		bool bReceiveShadows;
+		float ShadowNormalOffset;
 	};
 	std::vector<FMeasureDraw> Draws;
 	for (const FStaticDrawGroup* Group : StaticGroups)
 		for (const FStaticDrawItem& Item : Group->Items)
 			Draws.push_back({ Group->Mesh, Group->Material, Group->LODIndex, Item.Slot, Item.StartIndex, Item.IndexCount,
 				&Item.Proxy->GetLocalToWorld(), Item.Proxy, Item.bOccludedByGpu != 0, nullptr,
-				Item.Proxy->IsReceivingShadows() });
+				Item.Proxy->IsReceivingShadows(), Item.Proxy->GetShadowNormalOffset() });
 	for (uint32 k = 0; k < FirstTranslucentIndex; ++k)
 	{
 		const FRenderPacket& Packet = RenderPackets[SortEntries[k].PacketIndex];
@@ -387,7 +388,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		const void* Key = Packet.Proxy ? static_cast<const void*>(Packet.Proxy) : static_cast<const void*>(&Packet);
 		Draws.push_back({ Packet.Mesh, Packet.Material, Packet.LODIndex, Packet.Slot, Packet.StartIndex, IndexCount,
 			&GetPacketWorld(Packet), Key, Packet.bOccludedByGpu, &Packet,
-			Packet.Proxy ? Packet.Proxy->IsReceivingShadows() : true });
+			Packet.Proxy ? Packet.Proxy->IsReceivingShadows() : true, Packet.Proxy ? Packet.Proxy->GetShadowNormalOffset() : 0.0f });
 	}
 
 	const uint32 Count = static_cast<uint32>(Draws.size());
@@ -451,7 +452,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 		else
 		{
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), ObjectStages);
-			UpdatePerObjectConstants(*Draw.World, Draw.bReceiveShadows);
+			UpdatePerObjectConstants(*Draw.World, Draw.bReceiveShadows, Draw.ShadowNormalOffset);
 		}
 
 		ID3D11Query* Query = OcclusionQueries[Index].Get();
@@ -605,18 +606,19 @@ void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, cons
 	const bool bReceiveShadows = RenderPacket.Proxy
 		? RenderPacket.Proxy->IsReceivingShadows()
 		: true;
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket), bReceiveShadows);
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket), bReceiveShadows, RenderPacket.Proxy ? RenderPacket.Proxy->GetShadowNormalOffset() : 0.0f);
 }
 
 void FRenderer::UpdatePerObjectConstants(
 	const FMatrix& World,
-	bool bReceiveShadows)
+	bool bReceiveShadows, float ShadowNormalOffset)
 {
 	FPerObjectConstants Constants{};
 
 	Constants.World = World;
 	Constants.NormalMatrix = World.Inverse().GetTransposed();
 	Constants.bReceiveShadows = bReceiveShadows ? 1u : 0u;
+	Constants.ShadowNormalOffset = ShadowNormalOffset;
 
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }

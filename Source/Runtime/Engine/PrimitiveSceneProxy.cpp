@@ -67,6 +67,7 @@ void FPrimitiveSceneProxy::UpdateRenderState()
     bVisible = Component->IsVisible();
     bCastShadows = Component->IsCastingShadows();
     bReceiveShadows = Component->IsReceivingShadows();
+    ShadowNormalOffset = Component->GetShadowNormalOffset();
     UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component);
     if (StaticMeshComponent) Mesh = StaticMeshComponent->GetStaticMesh();
     if (Mesh != PreviousMesh)

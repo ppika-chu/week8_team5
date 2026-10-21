@@ -54,7 +54,7 @@ void UPrimitiveComponent::PostEditChangeProperty(const FProperty& Property)
 	Super::PostEditChangeProperty(Property);
 
 	if (Property.Name == "bCastShadows" ||
-		Property.Name == "bReceiveShadows")
+		Property.Name == "bReceiveShadows" || Property.Name == "ShadowNormalOffset")
 	{
 		MarkRenderStateDirty();
 	}
