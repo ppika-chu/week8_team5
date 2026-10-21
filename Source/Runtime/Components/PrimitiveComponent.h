@@ -128,7 +128,7 @@ protected:
 	bool bVisible = true;
 	bool bCastShadows = true;
 	bool bReceiveShadows = true;
-	float ShadowNormalOffset = 0.0f; // 그림자 조회 위치를 노멀 방향으로 옮기는 월드 거리
+	float ShadowNormalOffset = 0.02f; // 그림자 조회 위치를 노멀 방향으로 옮기는 월드 거리
 
 private:
 	friend class FScene;

@@ -43,8 +43,8 @@ protected:
 	virtual void DestroyRenderState() override;
 private:
 	float ShadowResolutionScale = 1.0f;
-	float ShadowBias = 0.0f;
-	float ShadowSlopeBias = 0.0f;
+	float ShadowBias = 0.05f;
+	float ShadowSlopeBias = 1.0f;
 	float ShadowSharpen = 0.0f;
 
 };
