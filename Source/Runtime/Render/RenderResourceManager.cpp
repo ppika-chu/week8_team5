@@ -42,6 +42,15 @@ void FRenderResourceManager::ScanShaders(const fs::path& ShaderRoot)
 	LoadUberLit(ShaderRoot);
 }
 
+std::array<D3D_SHADER_MACRO, 3> FRenderResourceManager::MakeUberLitMacros(EViewMode ViewMode, EShadowFilter Filter)
+{
+	static const char* LightingMacros[] = { "LIGHTING_MODEL_GOURAUD", "LIGHTING_MODEL_LAMBERT", "LIGHTING_MODEL_BLINN_PHONG", "LIGHTING_MODEL_UNLIT", "WORLD_NORMAL" };
+	static const char* FilterMacros[] = { "SHADOW_FILTER_NONE", "SHADOW_FILTER_PCF3X3", "SHADOW_FILTER_PCF5X5", nullptr };
+	const bool bLit = ViewMode != EViewMode::Unlit && ViewMode != EViewMode::WorldNormal;
+	const char* FilterMacro = bLit ? FilterMacros[static_cast<int32>(Filter)] : nullptr;
+	return {{ { LightingMacros[static_cast<int32>(ViewMode)], "1" }, { FilterMacro, FilterMacro ? "1" : nullptr }, { nullptr, nullptr } }};
+}
+
 void FRenderResourceManager::LoadUberLit(const fs::path& ShaderRoot)
 {
 	const FString Path = (ShaderRoot / "UberLit.hlsl").generic_string();
@@ -76,6 +85,15 @@ void FRenderResourceManager::LoadUberLit(const fs::path& ShaderRoot)
 	UberLitPrograms[static_cast<int32>(EViewMode::Lit_BlinnPhong)] = FindProgram(MakeShaderKey(Path, BlinnPhong));
 	UberLitPrograms[static_cast<int32>(EViewMode::Unlit)] = FindProgram(MakeShaderKey(Path, Unlit));
 	UberLitPrograms[static_cast<int32>(EViewMode::WorldNormal)] = FindProgram(MakeShaderKey(Path, WorldNormal));
+
+	for (EViewMode ViewMode : { EViewMode::Lit_Gouraud, EViewMode::Lit_Lambert, EViewMode::Lit_BlinnPhong })
+	{
+		for (EShadowFilter Filter : { EShadowFilter::None, EShadowFilter::PCF3x3, EShadowFilter::PCF5x5 })
+		{
+			const auto Macros = MakeUberLitMacros(ViewMode, Filter);
+			LoadOrCompileShader(Path, Macros.data());
+		}
+	}
 }
 
 FShaderProgram* FRenderResourceManager::GetUberLitProgram(EViewMode Mode)

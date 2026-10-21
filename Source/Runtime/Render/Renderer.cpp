@@ -532,7 +532,8 @@ void FRenderer::EndObjectConstants()
 void FRenderer::BindMaterial(UMaterial* Material) {
 	FShaderProgram* Program{ Material->Shader };
 	if (FRenderResourceManager::IsUberLitProgram(Program)) {
-		if (FShaderProgram* Variant{ FRenderResourceManager::GetUberLitProgram(CurrentViewMode) }) {
+		const auto Macros = FRenderResourceManager::MakeUberLitMacros(CurrentViewMode, CurrentShadowFilter);
+		if (FShaderProgram* Variant{ FRenderResourceManager::GetShaderProgram("Resources/Shader/UberLit.hlsl", Macros.data()) }) {
 			Program = Variant;
 		}
 	}
@@ -627,6 +628,14 @@ void FRenderer::SetViewMode(EViewMode InViewMode)
 		return;
 	CurrentViewMode = InViewMode;
 	// 같은 머티리얼이라도 셰이더가 바뀌므로 다음 드로우에서 다시 바인딩하게 한다.
+	LastMaterial = nullptr;
+}
+
+void FRenderer::SetShadowFilter(EShadowFilter InShadowFilter)
+{
+	if (CurrentShadowFilter == InShadowFilter)
+		return;
+	CurrentShadowFilter = InShadowFilter;
 	LastMaterial = nullptr;
 }
 

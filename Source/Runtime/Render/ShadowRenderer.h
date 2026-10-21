@@ -47,10 +47,12 @@ struct alignas(16) FShadowInfo
 	float PrescaledTangentTheta;
 	float SlopeBias;
 	float NearPlane;
-
+	// 이번 뷰에서 유효한 깊이가 있는 맵만 샘플링한다.
+	uint32 bShadowActive = 0;
 	uint32 ArrayIndex = 0;
-	float FShadowInfo_padding[3];
+	float Padding[2] = {};
 };
+static_assert(sizeof(FShadowInfo) == 112);
 
 // Editor가 Scene에 넘기는 Setting 값 -> 셰이더에서 읽기
 struct FShadowSettings
@@ -139,9 +141,15 @@ public:
 	void BeginShadowPass();
 	void OnRender(FRenderQueue& ShadowQueue, uint32 ShadowInfoIndex);
 	void EndShadowPass();
+	void UploadShadowInfos();
 	void BindForLighting() const;
 
 	const TArray<FShadowInfo>& GetShadowInfos() const { return ShadowInfos; }
+	const TArray<FShadowCasterState>& GetRequestedCasterStates(
+		uint32 ShadowInfoIndex) const
+	{
+		return ShadowFrameEntries[ShadowInfoIndex].RequestedCasterStates;
+	}
 	const FShadowRenderStats& GetCurrentViewStats() const { return CurrentViewStats; }
 	const TArray<FLightShadowRange>& GetLightShadowRanges() const { return LightShadowRanges; }
 
